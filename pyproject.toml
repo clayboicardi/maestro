@@ -1,0 +1,110 @@
+[project]
+name = "clayworks-maestro-mcp"
+version = "0.1.0"
+description = "MCP server giving AI agents programmatic control over Stremio + Real-Debrid stacks (AIOStreams config CRUD, Torrentio URL builder, RD integration, find_best_stream composer)"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { file = "LICENSE" }
+authors = [
+    { name = "Clay Haworth", email = "clayhaworth1@gmail.com" },
+]
+keywords = ["mcp", "stremio", "real-debrid", "aiostreams", "claude", "model-context-protocol"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+]
+dependencies = [
+    "fastmcp>=3.0,<4.0",
+    "httpx>=0.27,<1.0",
+    "pydantic>=2.7,<3.0",
+    "pydantic-settings>=2.5,<3.0",
+    "structlog>=24.0,<26.0",
+    "tenacity>=8.2,<10.0",
+]
+
+[project.scripts]
+maestro-mcp = "maestro.server:main"
+
+[project.urls]
+Repository = "https://github.com/clayboicardi/maestro"
+Documentation = "https://github.com/clayboicardi/maestro#readme"
+Issues = "https://github.com/clayboicardi/maestro/issues"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/maestro"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3,<9.0",
+    "pytest-asyncio>=0.24,<1.0",
+    "pytest-cov>=5.0,<7.0",
+    "respx>=0.21,<1.0",
+    "ruff>=0.15,<1.0",
+    "basedpyright>=1.39,<2.0",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = [
+    "E", "F", "W", "I", "N", "UP", "B", "A", "C4", "SIM", "RUF",
+    "PT", "PTH", "ERA", "PL",
+]
+ignore = [
+    "PLR0913",
+    "E501",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["PLR2004", "S101"]
+"src/maestro/aiostreams/schemas_generated.py" = ["ALL"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.basedpyright]
+include = ["src/maestro"]
+exclude = [
+    "**/__pycache__",
+    "src/maestro/aiostreams/schemas_generated.py",
+]
+typeCheckingMode = "standard"
+pythonVersion = "3.12"
+reportMissingImports = "error"
+reportMissingTypeStubs = "warning"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = [
+    "smoke: live-network tests (opt-in via MAESTRO_SMOKE=1)",
+    "schema_fidelity: AIOStreams upstream schema drift detector",
+]
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--strict-config",
+    "-m", "not smoke",
+]
+
+[tool.coverage.run]
+source = ["src/maestro"]
+omit = [
+    "src/maestro/aiostreams/schemas_generated.py",
+    "src/maestro/__init__.py",
+]
+
+[tool.coverage.report]
+fail_under = 75
+show_missing = true
