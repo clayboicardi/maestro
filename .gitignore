@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.cover
+.hypothesis/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# uv
+# uv.lock is committed; ignore only build artifacts
+dist/
+build/
+
+# Secrets / local config
+.env
+.env.local
+*.secret
+~/.config/maestro/  # user runtime state (filter_gate_state.json)
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
