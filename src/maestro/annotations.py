@@ -15,12 +15,21 @@ from pydantic import BaseModel
 AnnotationKind = Literal["read", "write", "compute"]
 
 _READ_PREFIXES = ("_get_", "_list_", "_check_", "_validate_", "_parse_")
-_READ_EXACT = {"realdebrid_get_user_info", "stremio_query_addon",
-               "stremio_query_addons_parallel", "stremio_get_manifest"}
+_READ_EXACT = {
+    "realdebrid_get_user_info",
+    "stremio_query_addon",
+    "stremio_query_addons_parallel",
+    "stremio_get_manifest",
+}
 _COMPUTE_EXACT = {
-    "stremio_dedupe_streams", "stremio_filter_streams", "stremio_rank_streams",
-    "torrentio_build_url", "torrentio_validate_config", "torrentio_list_providers",
-    "torrentio_list_quality_filters", "realdebrid_filter_gate_check",
+    "stremio_dedupe_streams",
+    "stremio_filter_streams",
+    "stremio_rank_streams",
+    "torrentio_build_url",
+    "torrentio_validate_config",
+    "torrentio_list_providers",
+    "torrentio_list_quality_filters",
+    "realdebrid_filter_gate_check",
 }
 
 

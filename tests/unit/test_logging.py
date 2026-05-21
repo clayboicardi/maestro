@@ -45,6 +45,7 @@ def test_configure_logging_console_format(monkeypatch: object) -> None:
 def pytest_raises_json():
     """Helper: assert text is NOT valid JSON."""
     import pytest  # noqa: PLC0415 - local import keeps helper self-contained
+
     return pytest.raises(json.JSONDecodeError)
 
 
