@@ -34,7 +34,9 @@ CONSTANTS_PATH="packages/core/src/utils/constants.ts"
 OUT_PY="src/maestro/aiostreams/schemas_generated.py"
 WORK_DIR="$(mktemp -d)"
 
-trap 'rm -rf "$WORK_DIR"' EXIT
+# Guard against empty $WORK_DIR (mktemp -d can fail on a full tmpfs; we'd
+# otherwise fire `rm -rf ""` whose behaviour is undefined outside GNU rm).
+trap '[[ -n "${WORK_DIR:-}" ]] && rm -rf "$WORK_DIR"' EXIT
 
 echo "[regen] cloning ${REPO_URL}@${PINNED_TAG} into ${WORK_DIR}"
 git clone --depth=1 --branch "$PINNED_TAG" "$REPO_URL" "$WORK_DIR/AIOStreams" >/dev/null 2>&1
@@ -137,24 +139,38 @@ if (skipped.length > 0) {
 console.log(JSON.stringify(root, null, 2));
 TS
 
-cd "$EXTRACT"
-echo "[regen] installing extractor deps (zod v4 + tsx)"
-npm install --silent --no-audit --no-fund
+# Run the extractor inside a subshell so cd is scoped — if anything
+# inside calls `exit`, the parent shell's CWD stays at the repo root.
+# That matters for the EXIT trap (`rm -rf "$WORK_DIR"`), which on some
+# Linux kernels leaves a dangling `.` reference if the shell's CWD is
+# inside the directory being removed.
+(
+    cd "$EXTRACT"
+    echo "[regen] installing extractor deps (zod v4 + tsx)"
+    # `set -e` should catch this, but `npm install --silent` can swallow
+    # exit codes on some npm versions — be explicit for consistency with
+    # the git-clone and tsx error patterns.
+    npm install --silent --no-audit --no-fund || {
+        echo "[regen] FATAL: npm install failed" >&2
+        exit 1
+    }
 
-echo "[regen] running Zod -> JSON Schema extractor (tsx)"
-npx --no-install tsx extract.ts > "$WORK_DIR/schemas.json" 2> "$WORK_DIR/extract.err" || {
-    echo "[regen] FATAL: extraction failed" >&2
-    cat "$WORK_DIR/extract.err" >&2
-    exit 1
-}
+    echo "[regen] running Zod -> JSON Schema extractor (tsx)"
+    # Call the local binary directly rather than `npx --no-install tsx`;
+    # npx's behaviour around `--no-install` varies by npm version, and
+    # the direct path is unambiguous.
+    ./node_modules/.bin/tsx extract.ts > "$WORK_DIR/schemas.json" 2> "$WORK_DIR/extract.err" || {
+        echo "[regen] FATAL: extraction failed" >&2
+        cat "$WORK_DIR/extract.err" >&2
+        exit 1
+    }
+)
 
 # Surface any non-fatal per-export skips to the operator.
 if [[ -s "$WORK_DIR/extract.err" ]]; then
     echo "[regen] extractor stderr (non-fatal skips):"
     cat "$WORK_DIR/extract.err"
 fi
-
-cd - >/dev/null
 
 echo "[regen] generating Pydantic models via datamodel-code-generator"
 # Use ruff formatters (instead of the default black+isort) so the
