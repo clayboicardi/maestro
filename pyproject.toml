@@ -68,6 +68,9 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "tests/**/*.py" = ["PLR2004", "S101"]
 "src/maestro/aiostreams/schemas_generated.py" = ["ALL"]
+# Error taxonomy: subclasses are Pydantic BaseModels, never raised. N818's
+# "must end with Error" rule is for Exception subclasses and does not apply.
+"src/maestro/errors.py" = ["N818"]
 
 [tool.ruff.format]
 quote-style = "double"
