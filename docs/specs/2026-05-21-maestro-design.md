@@ -1,10 +1,11 @@
 # Maestro by Clayworks — v1 Design Spec
 
 **Date:** 2026-05-21
-**Status:** Approved (design walkthrough complete; awaiting Clay's spec review before plan phase)
+**Status:** Approved + best-practices-validated (design walkthrough complete; build-mcp-server skill consulted; awaiting Clay's spec review before plan phase)
 **Authors:** Clay Haworth + ClaydeClaw (MCP-builder session)
 **Co-author input:** parallel CC session ("Stremio + RD optimization") handoff doc, 2026-05-21
 **Spec location (durable):** `<repo>/docs/specs/2026-05-21-maestro-design.md`
+**Best-practices validation:** Anthropic MCP-server-dev skills consulted (`build-mcp-server` invoked; `build-mcpb` deferred to v1.x packaging). Mandatory tool annotations applied. Directory submission deferred indefinitely.
 
 ---
 
@@ -240,6 +241,12 @@ find_best_stream(
 4. **Docstrings are load-bearing.** Claude reads them to choose tools. Include constraint hints and examples.
 5. **Staged-write commit pattern.** AIOStreams writes are staged; `aiostreams_save()` is the only mutating call to remote state.
 6. **Secret redaction.** Read-tools default to redacting RD tokens, AIOStreams passwords. Override via `include_secrets=True`; logged when used.
+7. **Tool annotations are mandatory** (Anthropic Directory review requirement). Every tool must declare:
+    - `title` — human-readable name (e.g., "Set AIOStreams Preferred Languages")
+    - `readOnlyHint: true` for read-only tools (all `*_get_*`, `*_list_*`, `*_check_*`, `*_validate_*`, `realdebrid_get_user_info`, `stremio_query_addon`, `stremio_get_manifest`, `torrentio_parse_url`)
+    - `destructiveHint: true` for tools that modify or delete state (all `aiostreams_set_*`, `aiostreams_add_*`, `aiostreams_remove_*`, `aiostreams_toggle_*`, `aiostreams_save`, `aiostreams_apply_template`, `realdebrid_add_torrent`, `find_best_stream` — modifies RD library when unrestricting)
+    - Neither hint for pure compute (`stremio_dedupe_streams`, `stremio_filter_streams`, `stremio_rank_streams`, `torrentio_build_url`, `torrentio_validate_config`, `realdebrid_filter_gate_check`) — these are read/transform-only
+   FastMCP exposes these via the `@mcp.tool(annotations=ToolAnnotations(...))` decorator. All v1 tools must set them explicitly; CI lint to enforce.
 
 **v1.0 ship target:** 33 🔴 tools + 9 🟡 tools as stretch (1 🟢 explicitly v1.x). ~43 total across all tiers.
 
@@ -413,10 +420,29 @@ tests/
 3. **Schema fidelity is the canary** — when AIOStreams ships `schemas.ts` changes, this test fails and we know to regen.
 4. **MCP Inspector integration in v1.x** — drive a test FastMCP server via `mcp-inspector --cli` in CI to catch tool-schema regressions.
 
+### Testing inside Claude (release readiness)
+
+Independent of directory submission (deferred indefinitely for v1), every tool should be exercised end-to-end inside a real Claude client before tagging v1.0. v1 release checklist:
+
+1. **Local install via Claude Code CLI MCP config** (primary dev loop):
+   - `~/.claude/mcp/maestro.json` with stdio command + env block
+   - Verify each tool surfaces in `/tools` listing
+   - Exercise every 🔴 tool via natural-language prompt
+2. **Local install via Claude Desktop** (secondary, MCPB-prep for v1.x):
+   - `claude_desktop_config.json` with `command` + `env`
+   - Verify identical behavior to Claude Code
+3. **MCP Inspector full sweep** (`npx @modelcontextprotocol/inspector`):
+   - Connect to local stdio server
+   - Exercise every tool with mocked + real inputs
+   - Capture output for spec/docs
+4. **Verify `clientInfo.name: "claude-ai"`** is received on initialize when connected to real Claude (informational diagnostic).
+
 ---
 
 ## Open questions deferred to v1.x
 
+- **MCPB packaging** (v1.x — invokes `mcp-server-dev:build-mcpb` skill; bundles Python runtime in `.mcpb` (~50-80MB) for Claude Desktop one-click install; project structure already MCPB-compatible)
+- **Elicitation for destructive-tool confirmations** (v1.x — currently `apply_template` requires explicit two-call confirmation; v1.x adds elicitation with capability-check + fallback pattern per MCP spec, requires Claude Code ≥2.1.76)
 - **CI auto-regen PR-bot** for AIOStreams schemas (v1.x — adds infra complexity)
 - **Persistent telemetry** for `diagnose_dud_rate` (v1.x — needs storage layer)
 - **MCP Inspector in CI** (v1.x)
@@ -424,6 +450,8 @@ tests/
 - **Configurable scoring profiles for the composer** (v1.x — v1 ships single default)
 - **Multi-instance support** (v1.x — v1 supports one AIOStreams instance per server process)
 - **`diagnose_recent_errors(window)` tool** (v1.x — needs in-memory log buffer)
+- **Hybrid search+execute tool pattern** (defer to evidence: ship v1 one-per-action; only refactor to hybrid if real-world context burn proves problematic)
+- **Anthropic Directory submission** (deferred indefinitely — Stremio+RD ecosystem is piracy-adjacent and may not pass directory review; PyPI + GitHub distribution covers Clayworks-portfolio reach without review-risk; reassess if landscape shifts)
 
 ---
 
