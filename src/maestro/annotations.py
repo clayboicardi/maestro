@@ -14,7 +14,8 @@ from pydantic import BaseModel
 
 AnnotationKind = Literal["read", "write", "compute"]
 
-_READ_PREFIXES = ("_get_", "_list_", "_check_", "_validate_", "_parse_")
+# Verb substrings (wrapped underscores let "get_x" and "x_get_y" both match).
+_READ_INFIXES = ("_get_", "_list_", "_check_", "_validate_", "_parse_")
 _READ_EXACT = {
     "realdebrid_get_user_info",
     "stremio_query_addon",
@@ -65,7 +66,7 @@ def compute_annotation(tool_name: str) -> AnnotationKind:
         return "compute"
     if tool_name in _READ_EXACT:
         return "read"
-    if any(p in f"_{tool_name}_" for p in _READ_PREFIXES):
+    if any(p in f"_{tool_name}_" for p in _READ_INFIXES):
         return "read"
     if tool_name == "find_best_stream":
         return "write"

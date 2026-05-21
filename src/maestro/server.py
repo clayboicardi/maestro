@@ -7,12 +7,29 @@ register_* functions in later phases.
 from __future__ import annotations
 
 import sys
+from urllib.parse import urlsplit, urlunsplit
 
 import structlog
 from fastmcp import FastMCP
 
 from maestro.config import MaestroSettings
 from maestro.logging import configure_logging
+
+
+def _strip_userinfo(url: str) -> str:
+    """Drop user:password@ from a URL string before logging.
+
+    Defense in depth: even though Maestro's AIOStreams/RD auth uses
+    separate header credentials, never log raw URLs that might contain
+    accidentally-embedded userinfo.
+    """
+    parts = urlsplit(url)
+    if parts.username or parts.password:
+        netloc = parts.hostname or ""
+        if parts.port:
+            netloc = f"{netloc}:{parts.port}"
+        return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
+    return url
 
 
 def create_server() -> FastMCP:
@@ -27,8 +44,8 @@ def create_server() -> FastMCP:
     log = structlog.get_logger("maestro.server")
     log.info(
         "server_starting",
-        aiostreams_base_url=str(settings.aiostreams_base_url),
-        torrentio_base_url=str(settings.torrentio_base_url),
+        aiostreams_base_url=_strip_userinfo(str(settings.aiostreams_base_url)),
+        torrentio_base_url=_strip_userinfo(str(settings.torrentio_base_url)),
         http_timeout_s=settings.http_timeout_s,
     )
 
