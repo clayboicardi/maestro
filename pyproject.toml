@@ -71,6 +71,10 @@ ignore = [
 # Error taxonomy: subclasses are Pydantic BaseModels, never raised. N818's
 # "must end with Error" rule is for Exception subclasses and does not apply.
 "src/maestro/errors.py" = ["N818"]
+# ToolAnnotations fields are mandated camelCase by the MCP wire format
+# (readOnlyHint, destructiveHint, idempotentHint, openWorldHint) -- they
+# cannot be renamed to snake_case. N815 ("mixedCase in class scope") doesn't apply.
+"src/maestro/annotations.py" = ["N815"]
 
 [tool.ruff.format]
 quote-style = "double"
