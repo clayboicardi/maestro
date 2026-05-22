@@ -17,6 +17,7 @@ from maestro.config import MaestroSettings
 from maestro.logging import configure_logging
 from maestro.middleware import MaestroErrorMiddleware
 from maestro.realdebrid import register_tools as register_realdebrid
+from maestro.stremio import register_tools as register_stremio
 from maestro.torrentio import register_tools as register_torrentio
 
 
@@ -58,6 +59,7 @@ def create_server() -> FastMCP:
     register_aiostreams(mcp, settings)
     register_torrentio(mcp)
     register_realdebrid(mcp, settings)
+    register_stremio(mcp, settings)
     return mcp
 
 
