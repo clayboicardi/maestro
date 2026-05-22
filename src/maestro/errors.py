@@ -51,7 +51,7 @@ class RateLimitError(MaestroError):
 class SchemaError(MaestroError):
     code: str = "schema_error"
     message: str = "Schema mismatch — upstream may have changed"
-    # `suggestion` is intentionally None at the base level: SchemaError is generic
+    # `suggestion` is intentionally None at the class level: SchemaError is generic
     # across domains, so each raise site passes a domain-appropriate fix hint
     # (e.g., AIOStreams raise sites suggest running scripts/regen_aiostreams_schemas.sh).
     suggestion: str | None = None
