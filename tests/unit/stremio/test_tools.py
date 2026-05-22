@@ -38,6 +38,17 @@ def test_filter_streams_by_language_keyword() -> None:
     assert filtered[0]["infoHash"] == "a"
 
 
+def test_filter_streams_handles_null_title_or_name() -> None:
+    """Sparse JSON from real addons (title=None, name=None) must not crash."""
+    streams = [
+        {"title": None, "name": "1080p English", "infoHash": "a"},
+        {"title": "S01E03 Russian", "name": None, "infoHash": "b"},
+        {"title": None, "name": None, "infoHash": "c"},
+    ]
+    filtered = stremio_filter_streams(streams, preferred_languages=["english"])
+    assert {s["infoHash"] for s in filtered} == {"a"}
+
+
 def test_rank_streams_cached_first() -> None:
     """Cached streams sort before uncached when 'cached' leads the strategy."""
     streams = [

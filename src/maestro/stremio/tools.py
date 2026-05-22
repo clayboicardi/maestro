@@ -29,6 +29,16 @@ from maestro.stremio.client import StremioAddonClient
 log = structlog.get_logger("maestro.stremio.tools")
 
 
+def _title_text(s: dict[str, Any]) -> str:
+    """Concatenate stream ``title`` + ``name`` for substring matching.
+
+    Coalesces missing-OR-``None`` fields to ``""`` -- real Stremio addons
+    send sparse JSON where a field can be explicitly null, and
+    ``s.get("title", "") + s.get("name", "")`` would crash on ``None + str``.
+    """
+    return ((s.get("title") or "") + (s.get("name") or "")).lower()
+
+
 def stremio_dedupe_streams(streams: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Dedupe streams by infoHash, falling back to title then repr.
 
@@ -65,21 +75,11 @@ def stremio_filter_streams(
     out = list(streams)
     if preferred_languages:
         out = [
-            s
-            for s in out
-            if any(
-                lang.lower() in (s.get("title", "") + s.get("name", "")).lower()
-                for lang in preferred_languages
-            )
+            s for s in out if any(lang.lower() in _title_text(s) for lang in preferred_languages)
         ]
     if exclude_quality_tags:
         out = [
-            s
-            for s in out
-            if not any(
-                tag.lower() in (s.get("title", "") + s.get("name", "")).lower()
-                for tag in exclude_quality_tags
-            )
+            s for s in out if not any(tag.lower() in _title_text(s) for tag in exclude_quality_tags)
         ]
     return out
 
@@ -104,13 +104,13 @@ def stremio_rank_streams(
     natively, so streams without the field rank as uncached.
     """
 
-    def key_for(s: dict[str, Any]) -> tuple[Any, ...]:
-        parts: list[Any] = []
+    def key_for(s: dict[str, Any]) -> tuple[int, ...]:
+        parts: list[int] = []
         for k in sort_strategy:
             if k == "cached":
                 parts.append(0 if s.get("cached") else 1)
             elif k == "resolution":
-                title = (s.get("title", "") + s.get("name", "")).lower()
+                title = _title_text(s)
                 for res, rank in [("4k", 0), ("1080p", 1), ("720p", 2), ("480p", 3)]:
                     if res in title:
                         parts.append(rank)
@@ -139,7 +139,6 @@ class StremioToolset:
 
     def __init__(self, *, timeout_s: float = 10.0) -> None:
         self._client = StremioAddonClient(timeout_s=timeout_s)
-        self._timeout_s = timeout_s
 
     async def query_addon(
         self,
