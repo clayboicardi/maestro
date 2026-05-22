@@ -41,7 +41,7 @@ The campaign covers eight review PRs. Each maps to a subsystem chunked to fit Ge
 | 1 | Server + `MaestroErrorMiddleware` + error taxonomy + config + logging + tool annotations | HIGH | 1 | MCP stdio rule, structlog → stderr, pydantic-settings env-var loading, error-payload translation at the wire boundary, per-tool MCP annotations completeness |
 | 2 | AIOStreams client + tools + modify + templates + staged-write commit | HIGH | 1 | Staged-write `_modify(fn)` plus `aiostreams_save()` PUT-full-replace contract, 21-tool surface, template fetch and merge, `SecretStr` discipline on basic-auth credentials |
 | 3 | Real-Debrid client + filter-gate runtime learner | HIGH | 1 | Persistent state-file safety, learning-loop side effects, bearer-token redaction, async-client lifecycle trade-offs |
-| 4 | Composer (`find_best_stream`) + Stremio addon-protocol client (bundled) | HIGH | 1 | Killer-feature chain order (AIOStreams → RD cache → filter-gate heuristic → RD unrestrict → retry), structured failure with `attempts[]` plus `suggestion`, tenacity backoff bounds, generic Stremio addon-protocol client |
+| 4 | Composer (`find_best_stream`) + Stremio addon-protocol client (bundled) | HIGH | 1 | Primary chain order (AIOStreams → RD cache → filter-gate heuristic → RD unrestrict → retry), structured failure with `attempts[]` plus `suggestion`, tenacity backoff bounds, generic Stremio addon-protocol client |
 | 5 | Torrentio URL codec | MEDIUM | 1 | Pure-compute pipe-delimited encode and decode round-trip correctness, provider and quality and language enum freshness, environment-variable wiring follow-up |
 | 6 | Diagnostics health probes | MEDIUM | 1 | Three health-probe tools, idempotency and timeout discipline on probe HTTP, stub-tool semantics |
 | 7 | AIOStreams schema-generation pipeline | MEDIUM | 1 | Zod → JSON Schema → Pydantic toolchain integrity, two-file re-pin invariant (script version constant plus schema SHA file), drift detector, generated-code lint exemption |
@@ -94,7 +94,7 @@ Total review PRs: 8.
 
 - **Branch:** `review-composer-1`
 - **Severity threshold:** TBD per PR 1 outcome
-- **Scope:** The killer composer that chains AIOStreams → RD cache check → filter-gate heuristic → RD unrestrict → retry, plus the generic Stremio addon-protocol client it depends on. Bundled because the Stremio client's only v1.0 consumer is the composer; reviewing them together gives Gemini the full dependency context.
+- **Scope:** The primary composer that chains AIOStreams → RD cache check → filter-gate heuristic → RD unrestrict → retry, plus the generic Stremio addon-protocol client it depends on. Bundled because the Stremio client's only v1.0 consumer is the composer; reviewing them together gives Gemini the full dependency context.
 - **Focus areas (priority order):**
   1. Chain-order correctness: the composer queries AIOStreams once, trusts the user's already-configured aggregation, and then walks candidates in order against the RD cache check + filter-gate heuristic + unrestrict + retry sequence. No parallel fan-out across aggregators.
   2. Structured failure: when no candidate resolves, the composer returns a structured `attempts[]` payload plus a `suggestion` string. The result types live in `compose/types.py`; the `StreamResolution`, `Attempt`, and `StreamMetadata` shapes must round-trip cleanly through the MCP wire format.
@@ -165,7 +165,7 @@ Total review PRs: 8.
   ```
 
 - **CI gates currently enforced:** ruff lint, ruff format check, basedpyright type check, pytest matrix on Python 3.12, 3.13, and 3.14. Smoke workflow runs nightly at 06:00 UTC and on manual dispatch; the smoke run is opt-in via `MAESTRO_SMOKE=1` and gated on four repository secrets that are now configured.
-- **Coverage threshold:** declared at 75% in `pyproject.toml`, but the CI workflow does not currently invoke pytest with `--cov`, so the threshold is not yet enforced in CI. The README's ~92% figure is a local-run measurement. A one-line CI step addition is a known follow-up; PR 8 may surface it independently.
+- **Coverage threshold:** declared at 75% in `pyproject.toml`, but the CI workflow does not currently invoke pytest with `--cov`, so the threshold is not yet enforced in CI. The README's ~92% figure is a local-run measurement.
 - **`CHANGELOG.md` is in `.gemini/ignore_patterns`.** Gemini will not review CHANGELOG entries directly; their accuracy surfaces through `/octo:review` and the project-scoped session.
 - **Hard invariants** that every review verifies regardless of which subsystem the PR scopes to: stdout must stay empty (no `print()`, no untyped libraries that warn to stdout), `SecretStr` fields use `.get_secret_value()` for any comparison or auth-header construction, and the schema-regeneration script and SHA file must stay in sync as a two-file pin.
 - **Release context:** `v0.1.0` was tagged and a GitHub Release published on 2026-05-22. The repository went public the same day. The PyPI package has not yet been published; that step is deferred pending separate authorization.
