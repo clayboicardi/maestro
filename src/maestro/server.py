@@ -53,6 +53,10 @@ def create_server() -> FastMCP:
         aiostreams_base_url=_strip_userinfo(str(settings.aiostreams_base_url)),
         torrentio_base_url=_strip_userinfo(str(settings.torrentio_base_url)),
         http_timeout_s=settings.http_timeout_s,
+        rd_token_present=bool(settings.rd_token.get_secret_value()),
+        stremio_active=True,
+        compose_active=True,
+        compose_budget_s=settings.compose_budget_s,
     )
 
     mcp = FastMCP(name="maestro")
