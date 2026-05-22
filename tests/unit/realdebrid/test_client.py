@@ -91,3 +91,66 @@ async def test_rate_limit_429_raises_rate_limit_error(client: RDClient) -> None:
         await client.get_user_info()
     assert isinstance(exc_info.value.error, RateLimitError)
     assert exc_info.value.error.retry_after_s == 30.0
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_add_magnet_sends_form_data(client: RDClient) -> None:
+    route = respx.post("https://api.real-debrid.com/rest/1.0/torrents/addMagnet").mock(
+        return_value=httpx.Response(200, json={"id": "abc", "uri": "magnet:?xt=urn:btih:DEADBEEF"})
+    )
+    result = await client.add_magnet("magnet:?xt=urn:btih:DEADBEEF")
+    assert result["id"] == "abc"
+    # Verify form-encoded body carries the magnet param.
+    assert route.calls.last.request.content == b"magnet=magnet%3A%3Fxt%3Durn%3Abtih%3ADEADBEEF"
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_get_torrent_status_returns_info(client: RDClient) -> None:
+    payload = {
+        "id": "abc",
+        "filename": "movie.mkv",
+        "status": "downloaded",
+        "progress": 100,
+        "files": [{"id": 1, "path": "/movie.mkv", "selected": 1}],
+    }
+    respx.get("https://api.real-debrid.com/rest/1.0/torrents/info/abc").mock(
+        return_value=httpx.Response(200, json=payload)
+    )
+    result = await client.get_torrent_status("abc")
+    assert result["status"] == "downloaded"
+    assert result["files"][0]["path"] == "/movie.mkv"
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_get_library_returns_list(client: RDClient) -> None:
+    payload = [
+        {"id": "abc", "filename": "a.mkv", "status": "downloaded"},
+        {"id": "def", "filename": "b.mkv", "status": "downloading"},
+    ]
+    respx.get("https://api.real-debrid.com/rest/1.0/torrents").mock(
+        return_value=httpx.Response(200, json=payload)
+    )
+    result = await client.get_library()
+    assert len(result) == 2
+    assert result[0]["id"] == "abc"
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_4xx_does_not_retry(client: RDClient) -> None:
+    """Regression guard: 4xx (non-401/429) must NOT trigger the retry loop.
+
+    A 404 on /unrestrict/link is non-transient (UpstreamError with
+    is_transient=False). The retry predicate must honor that field.
+    """
+    route = respx.post("https://api.real-debrid.com/rest/1.0/unrestrict/link").mock(
+        return_value=httpx.Response(404, json={"error": "not_found", "error_code": 7})
+    )
+    with pytest.raises(MaestroException) as exc_info:
+        await client.unrestrict_link("https://restricted.rd/missing")
+    assert isinstance(exc_info.value.error, UpstreamError)
+    assert exc_info.value.error.is_transient is False
+    assert route.call_count == 1
