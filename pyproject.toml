@@ -105,6 +105,11 @@ addopts = [
     "--strict-markers",
     "--strict-config",
     "-m", "not smoke",
+    # Avoid sibling test-module basename collisions (e.g. integration/aiostreams/test_tool_registration.py
+    # and integration/torrentio/test_tool_registration.py) without forcing __init__.py into the
+    # integration tree. `importlib` is pytest's recommended mode for projects with multiple test
+    # subpackages that share file basenames.
+    "--import-mode=importlib",
 ]
 
 [tool.coverage.run]
