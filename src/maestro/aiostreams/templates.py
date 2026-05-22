@@ -67,8 +67,9 @@ def merge_template_into_config(
         base[key] wholesale. Setting a key to None intentionally erases
         the base entry.
 
-    Mode is recorded in `_meta.applied_mode` for downstream audit; it
-    doesn't currently drive any filtering.
+    Mode is a placeholder for future mode-driven filtering (Debrid/P2P/Both);
+    today it has no effect on the merge result. Callers should still pass
+    it so the call site documents intent.
     """
     merged = deepcopy(base)
     for key, value in template.items():
@@ -77,5 +78,4 @@ def merge_template_into_config(
             merged[key] = {**existing, **deepcopy(value)}
         else:
             merged[key] = deepcopy(value)
-    merged.setdefault("_meta", {})["applied_mode"] = mode
     return merged

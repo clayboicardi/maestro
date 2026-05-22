@@ -4,13 +4,14 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from copy import deepcopy
-from typing import Any, Literal
+from typing import Any
 
 import structlog
 
 from maestro.aiostreams.modify import ConfigStager, PendingMutation
 from maestro.aiostreams.templates import (
     KNOWN_TEMPLATES,
+    Mode,
     fetch_template,
     merge_template_into_config,
 )
@@ -232,7 +233,7 @@ class AIOStreamsToolset:
         self,
         template_name: str,
         *,
-        mode: Literal["Debrid", "P2P", "Both"] = "Debrid",
+        mode: Mode = "Debrid",
     ) -> PendingMutation:
         """DESTRUCTIVE: replaces config with the named template overlay.
 
@@ -249,6 +250,12 @@ class AIOStreamsToolset:
             )
 
         template_payload = await fetch_template(match["source_url"])
+        log.info(
+            "aiostreams_apply_template",
+            template_name=template_name,
+            mode=mode,
+            source_url=match["source_url"],
+        )
 
         def transform(cfg: dict[str, Any]) -> dict[str, Any]:
             merged = merge_template_into_config(cfg, template_payload, mode=mode)
