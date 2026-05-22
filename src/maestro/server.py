@@ -13,6 +13,7 @@ import structlog
 from fastmcp import FastMCP
 
 from maestro.aiostreams import register_tools as register_aiostreams
+from maestro.compose import register_tools as register_compose
 from maestro.config import MaestroSettings
 from maestro.logging import configure_logging
 from maestro.middleware import MaestroErrorMiddleware
@@ -58,8 +59,16 @@ def create_server() -> FastMCP:
     mcp.add_middleware(MaestroErrorMiddleware())
     register_aiostreams(mcp, settings)
     register_torrentio(mcp)
-    register_realdebrid(mcp, settings)
-    register_stremio(mcp, settings)
+    rd_toolset = register_realdebrid(mcp, settings)
+    stremio_toolset = register_stremio(mcp, settings)
+    register_compose(
+        mcp,
+        stremio_toolset=stremio_toolset,
+        rd_toolset=rd_toolset,
+        learner=rd_toolset._learner,
+        aiostreams_addon_url=str(settings.aiostreams_base_url),
+        compose_budget_s=settings.compose_budget_s,
+    )
     return mcp
 
 
