@@ -60,3 +60,23 @@ def test_password_redacted_in_repr(monkeypatch: object) -> None:
 
     assert "super_secret_pw" not in repr(s)
     assert "super_secret_pw" not in str(s)
+
+
+def test_required_fields_locked() -> None:
+    """Lock the required-field set for MaestroSettings.
+
+    If a new required field is added, an existing one is given a default,
+    or a required field is renamed, this test fails -- forcing intentional
+    review of the configuration contract that operators rely on.
+    """
+    required = {
+        name
+        for name, field in MaestroSettings.model_fields.items()
+        if field.is_required()
+    }
+    assert required == {
+        "rd_token",
+        "aiostreams_base_url",
+        "aiostreams_uuid",
+        "aiostreams_password",
+    }
