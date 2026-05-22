@@ -13,7 +13,13 @@ from maestro.aiostreams.tools import (
 @pytest.fixture
 def sample_config() -> dict[str, Any]:
     return {
-        "services": [{"id": "realdebrid", "credential": "rd_token_real_secret", "enabled": True}],
+        "services": [
+            {
+                "id": "realdebrid",
+                "credentials": {"apiKey": "rd_token_real_secret"},
+                "enabled": True,
+            }
+        ],
         "addons": [
             {
                 "name": "Comet",
@@ -30,6 +36,16 @@ def sample_config() -> dict[str, Any]:
         "sortCriteria": [{"key": "cached", "direction": "desc"}],
         "presets": {"active": "tamtaro_recommended"},
         "statistics": {"enabled": True, "show_errors": True},
+        # Top-level sensitive fields (UserDataSchema in schemas_generated.py).
+        "tmdbApiKey": "tmdb_secret_token",
+        "rpdbApiKey": "rpdb_secret_token",
+        "addonPassword": "addon_password_secret",
+        # Optional proxy surface (Proxy2 schema).
+        "proxy": {
+            "enabled": True,
+            "url": "https://proxy.example",
+            "credentials": "proxy_secret_creds",
+        },
     }
 
 
@@ -45,22 +61,56 @@ def toolset(sample_config: dict[str, Any]) -> AIOStreamsToolset:
 
 
 @pytest.mark.asyncio
-async def test_get_config_redacts_credentials_by_default(toolset: AIOStreamsToolset) -> None:
+async def test_get_config_redacts_service_credentials_by_default(
+    toolset: AIOStreamsToolset,
+) -> None:
+    """Service `credentials` dict values are redacted; credential-name keys preserved."""
     result = await toolset.get_config(include_secrets=False)
-    assert result["services"][0]["credential"] == "***REDACTED***"
+    assert result["services"][0]["credentials"] == {"apiKey": "***REDACTED***"}
 
 
 @pytest.mark.asyncio
-async def test_get_config_can_include_secrets_when_explicit(toolset: AIOStreamsToolset) -> None:
+async def test_get_config_redacts_top_level_sensitive_fields(
+    toolset: AIOStreamsToolset,
+) -> None:
+    """Top-level API tokens + passwords are redacted by default."""
+    result = await toolset.get_config(include_secrets=False)
+    assert result["tmdbApiKey"] == "***REDACTED***"
+    assert result["rpdbApiKey"] == "***REDACTED***"
+    assert result["addonPassword"] == "***REDACTED***"
+
+
+@pytest.mark.asyncio
+async def test_get_config_redacts_proxy_credentials(
+    toolset: AIOStreamsToolset,
+) -> None:
+    """Optional proxy.credentials surface is redacted; sibling fields preserved."""
+    result = await toolset.get_config(include_secrets=False)
+    assert result["proxy"]["credentials"] == "***REDACTED***"
+    assert result["proxy"]["url"] == "https://proxy.example"
+    assert result["proxy"]["enabled"] is True
+
+
+@pytest.mark.asyncio
+async def test_get_config_can_include_secrets_when_explicit(
+    toolset: AIOStreamsToolset,
+) -> None:
+    """include_secrets=True returns all sensitive surfaces raw."""
     result = await toolset.get_config(include_secrets=True)
-    assert result["services"][0]["credential"] == "rd_token_real_secret"
+    assert result["services"][0]["credentials"] == {"apiKey": "rd_token_real_secret"}
+    assert result["tmdbApiKey"] == "tmdb_secret_token"
+    assert result["rpdbApiKey"] == "rpdb_secret_token"
+    assert result["addonPassword"] == "addon_password_secret"
+    assert result["proxy"]["credentials"] == "proxy_secret_creds"
 
 
 @pytest.mark.asyncio
 async def test_get_services_returns_redacted_list(toolset: AIOStreamsToolset) -> None:
+    """get_services redacts per-service credentials but preserves id + enabled."""
     services = await toolset.get_services()
-    assert services[0]["credential"] == "***REDACTED***"
+    assert services[0]["credentials"] == {"apiKey": "***REDACTED***"}
     assert services[0]["id"] == "realdebrid"
+    assert services[0]["enabled"] is True
 
 
 @pytest.mark.asyncio

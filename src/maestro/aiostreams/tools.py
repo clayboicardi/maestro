@@ -21,6 +21,22 @@ log = structlog.get_logger("maestro.aiostreams.tools")
 
 REDACTED = "***REDACTED***"
 
+# Top-level config keys carrying sensitive values that callers must not
+# surface through MCP tool reads unless include_secrets=True. Sourced
+# from maestro.aiostreams.schemas_generated.UserDataSchema -- if upstream
+# adds new credential-bearing fields, this list MUST be extended.
+_TOP_LEVEL_SECRET_KEYS: tuple[str, ...] = (
+    "encryptedPassword",
+    "addonPassword",
+    "rpdbApiKey",
+    "topPosterApiKey",
+    "aioratingsApiKey",
+    "openposterdbApiKey",
+    "tmdbAccessToken",
+    "tmdbApiKey",
+    "tvdbApiKey",
+)
+
 # Resolution floor ladder — must remain a subset of
 # maestro.aiostreams.schemas_generated.ExcludedResolution.
 # Ordered lowest→highest. "Unknown" intentionally excluded since it
@@ -39,10 +55,51 @@ _RESOLUTION_LADDER: list[str] = [
 
 
 def _redact_secrets(config: dict[str, Any]) -> dict[str, Any]:
+    """Return a deepcopy of ``config`` with sensitive values redacted.
+
+    AIOStreams stores sensitive material in three places per the upstream
+    UserDataSchema (see :mod:`maestro.aiostreams.schemas_generated`):
+
+    1. ``services[].credentials`` -- a ``dict[str, str]`` keyed by
+       credential name (e.g. ``{"apiKey": "rd_..."}``). Each value is
+       replaced with ``REDACTED``; keys are preserved so callers know
+       which credential names are configured.
+    2. Top-level API tokens and passwords listed in
+       :data:`_TOP_LEVEL_SECRET_KEYS`. Each present key's value is
+       replaced with ``REDACTED``; absent keys remain absent.
+    3. ``proxy.credentials`` (Proxy2 schema, optional) -- present only
+       when an upstream proxy is configured. Replaced with ``REDACTED``.
+
+    Any read path that surfaces config through an MCP tool MUST call
+    this redactor unless the caller has explicitly opted into
+    ``include_secrets``.
+
+    Implementation note: the deepcopy is load-bearing because
+    ``services`` is a list of dicts -- a shallow outer copy would share
+    the inner service dict objects, so writing
+    ``service["credentials"][k] = REDACTED`` on the copy would mutate
+    the originals. Python strings are immutable, so it is the
+    dict-list-dict nesting that requires deepcopy, not the credential
+    string values themselves.
+    """
     out = deepcopy(config)
+
+    # Per-service credentials (dict of credential-name -> value).
     for service in out.get("services", []):
-        if "credential" in service:
-            service["credential"] = REDACTED
+        creds = service.get("credentials")
+        if isinstance(creds, dict):
+            service["credentials"] = dict.fromkeys(creds, REDACTED)
+
+    # Top-level sensitive fields.
+    for key in _TOP_LEVEL_SECRET_KEYS:
+        if key in out:
+            out[key] = REDACTED
+
+    # Optional proxy credentials (Proxy2 surface).
+    proxy = out.get("proxy")
+    if isinstance(proxy, dict) and "credentials" in proxy:
+        proxy["credentials"] = REDACTED
+
     return out
 
 
