@@ -7,12 +7,11 @@ per-tool try/except boilerplate.
 
 from __future__ import annotations
 
-from typing import Any
-
 import structlog
 from fastmcp.server.middleware import CallNext, Middleware, MiddlewareContext
+from fastmcp.tools.base import ToolResult
 from mcp import McpError
-from mcp.types import ErrorData
+from mcp.types import CallToolRequestParams, ErrorData
 from pydantic import ValidationError
 
 from maestro.errors import MaestroException
@@ -30,14 +29,16 @@ class MaestroErrorMiddleware(Middleware):
     """
 
     async def on_call_tool(
-        self, context: MiddlewareContext[Any], call_next: CallNext[Any, Any]
-    ) -> Any:
+        self,
+        context: MiddlewareContext[CallToolRequestParams],
+        call_next: CallNext[CallToolRequestParams, ToolResult],
+    ) -> ToolResult:
         try:
             return await call_next(context)
         except MaestroException as e:
             log.warning(
                 "tool_error",
-                tool=context.method,
+                tool=context.message.name,
                 error_type=type(e.error).__name__,
             )
             raise McpError(
@@ -50,7 +51,7 @@ class MaestroErrorMiddleware(Middleware):
         except ValidationError as e:
             log.info(
                 "tool_input_invalid",
-                tool=context.method,
+                tool=context.message.name,
                 error_count=e.error_count(),
             )
             raise McpError(
