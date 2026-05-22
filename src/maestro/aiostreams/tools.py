@@ -8,7 +8,7 @@ from typing import Any
 
 import structlog
 
-from maestro.aiostreams.modify import ConfigStager
+from maestro.aiostreams.modify import ConfigStager, PendingMutation
 
 log = structlog.get_logger("maestro.aiostreams.tools")
 
@@ -92,3 +92,52 @@ class AIOStreamsToolset:
         Phase 3 stub - implementation in Task 3.4 (templates.py).
         """
         return []
+
+    async def set_preferred_languages(self, languages: list[str]) -> PendingMutation:
+        """Stage `filters.preferred_languages`. Order matters - first is primary."""
+        return await self._stager.modify(
+            lambda cfg: {
+                **cfg,
+                "filters": {**cfg.get("filters", {}), "preferred_languages": list(languages)},
+            },
+            field="filters.preferred_languages",
+        )
+
+    async def set_cached_only(self, *, enabled: bool) -> PendingMutation:
+        """Stage `filters.only_cached`. When true, AIOStreams returns only RD-cached streams."""
+        return await self._stager.modify(
+            lambda cfg: {
+                **cfg,
+                "filters": {**cfg.get("filters", {}), "only_cached": enabled},
+            },
+            field="filters.only_cached",
+        )
+
+    async def set_resolution_floor(self, min_resolution: str) -> PendingMutation:
+        """Exclude all resolutions below `min_resolution`.
+
+        Valid values: 240p, 360p, 480p, 720p, 1080p, 1440p, 4K, 8K.
+        """
+        ladder = ["240p", "360p", "480p", "720p", "1080p", "1440p", "4K", "8K"]
+        if min_resolution not in ladder:
+            raise ValueError(f"min_resolution must be one of {ladder}, got {min_resolution!r}")
+        index = ladder.index(min_resolution)
+        excluded = ladder[:index]
+
+        return await self._stager.modify(
+            lambda cfg: {
+                **cfg,
+                "filters": {**cfg.get("filters", {}), "excluded_resolutions": excluded},
+            },
+            field="filters.excluded_resolutions",
+        )
+
+    async def set_core_engine(self, engine: str) -> PendingMutation:
+        """Set the SEL core engine. Valid: 'Standard SEL - 3 per Q/R', 'Extended SEL - 6 per Q/R'."""
+        valid = {"Standard SEL - 3 per Q/R", "Extended SEL - 6 per Q/R"}
+        if engine not in valid:
+            raise ValueError(f"engine must be one of {sorted(valid)}, got {engine!r}")
+        return await self._stager.modify(
+            lambda cfg: {**cfg, "core_engine": engine},
+            field="core_engine",
+        )
