@@ -150,3 +150,48 @@ class AIOStreamsToolset:
             lambda cfg: {**cfg, "core_engine": engine},
             field="core_engine",
         )
+
+    async def add_addon(
+        self,
+        addon_url: str,
+        *,
+        position: int | None = None,
+    ) -> PendingMutation:
+        """Add an aggregated addon by manifest URL. Position is 0-indexed insert; None appends."""
+
+        def transform(cfg: dict[str, Any]) -> dict[str, Any]:
+            new_entry = {"manifestUrl": addon_url, "enabled": True}
+            addons = list(cfg.get("addons", []))
+            if position is None:
+                addons.append(new_entry)
+            else:
+                addons.insert(position, new_entry)
+            return {**cfg, "addons": addons}
+
+        return await self._stager.modify(transform, field="addons")
+
+    async def remove_addon(self, addon_name: str) -> PendingMutation:
+        """Remove an aggregated addon by name."""
+
+        def transform(cfg: dict[str, Any]) -> dict[str, Any]:
+            addons = list(cfg.get("addons", []))
+            for a in addons:
+                if a.get("name") == addon_name:
+                    addons.remove(a)
+                    return {**cfg, "addons": addons}
+            raise ValueError(f"Addon {addon_name!r} not found in current config")
+
+        return await self._stager.modify(transform, field="addons")
+
+    async def toggle_addon(self, addon_name: str, *, enabled: bool) -> PendingMutation:
+        """Enable or disable an aggregated addon without removing it."""
+
+        def transform(cfg: dict[str, Any]) -> dict[str, Any]:
+            addons = [dict(a) for a in cfg.get("addons", [])]
+            for a in addons:
+                if a.get("name") == addon_name:
+                    a["enabled"] = enabled
+                    return {**cfg, "addons": addons}
+            raise ValueError(f"Addon {addon_name!r} not found")
+
+        return await self._stager.modify(transform, field="addons")
