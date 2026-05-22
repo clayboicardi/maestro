@@ -75,4 +75,50 @@ def test_learner_loads_from_disk(tmp_path: Path) -> None:
 def test_predict_risk_high_after_learning() -> None:
     learner = FilterGateLearner()
     learner.record_strike("x.NOVELKW.mkv", "infringing_file")
-    assert learner.predict_risk("y.NOVELKW.mkv") == RiskLevel.HIGH
+    learner.record_strike("y.NOVELKW.mkv", "infringing_file")  # threshold = 2
+    assert learner.predict_risk("z.NOVELKW.mkv") == RiskLevel.HIGH
+
+
+def test_predict_risk_does_not_promote_below_threshold() -> None:
+    """Single strike records evidence but does not actuate predict_risk."""
+    learner = FilterGateLearner()
+    learner.record_strike("x.NOVELKW.mkv", "infringing_file")
+    assert "NOVELKW" in learner.learned_keywords  # evidence recorded
+    assert learner.learned_keywords["NOVELKW"].count == 1
+    assert learner.predict_risk("y.NOVELKW.mkv") == RiskLevel.LOW  # but not promoted yet
+
+
+def test_record_strike_skips_non_infringing_codes() -> None:
+    """record_strike is a no-op for non-infringing_file error codes."""
+    learner = FilterGateLearner()
+    result = learner.record_strike("x.NOVELKW.mkv", "rate_limit")
+    assert result == []
+    assert "NOVELKW" not in learner.learned_keywords
+
+
+def test_record_strike_skips_keywords_in_known() -> None:
+    """Tokens already in KNOWN_KEYWORDS aren't re-promoted to learned."""
+    learner = FilterGateLearner()
+    result = learner.record_strike("file.WEB-DL.mkv", "infringing_file")
+    assert result == []
+    assert "WEB-DL" not in learner.learned_keywords
+
+
+def test_matched_keywords_returns_all_substring_hits() -> None:
+    """matched_keywords returns every KNOWN_KEYWORDS hit, not just the first."""
+    learner = FilterGateLearner()
+    matched = learner.matched_keywords("S01E03.WEB-DL.AMZN.mkv")
+    assert set(matched) == {"WEB-DL", "AMZN"}
+
+
+def test_export_state_includes_known_and_learned() -> None:
+    """export_state surfaces both the static baseline and runtime-learned keywords."""
+    learner = FilterGateLearner()
+    learner.record_strike("a.TESTKW.mkv", "infringing_file")
+    learner.record_strike("b.TESTKW.mkv", "infringing_file")  # above threshold
+    state = learner.export_state()
+    assert "known_keywords" in state
+    assert state["known_keywords"] == sorted(KNOWN_KEYWORDS)
+    assert "learned_keywords" in state
+    assert "TESTKW" in state["learned_keywords"]
+    assert state["learned_keywords"]["TESTKW"]["count"] == 2

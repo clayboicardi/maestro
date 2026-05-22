@@ -42,6 +42,11 @@ KNOWN_KEYWORDS: set[str] = {
     "[eztv]",
 }
 
+# Learned keywords influence predict_risk only after this many strikes.
+# Guards against false-positive promotion of episode tags / codec markers
+# (S01E03, DDP5, etc.) that share the regex shape but aren't filter-gate keywords.
+LEARNED_PROMOTION_THRESHOLD: int = 2
+
 
 class RiskLevel(StrEnum):
     UNKNOWN = "unknown"
@@ -69,7 +74,9 @@ class FilterGateLearner:
         for kw in KNOWN_KEYWORDS:
             if kw.upper() in upper:
                 return RiskLevel.HIGH
-        for kw in self.learned_keywords:
+        for kw, evidence in self.learned_keywords.items():
+            if evidence.count < LEARNED_PROMOTION_THRESHOLD:
+                continue
             if kw.upper() in upper:
                 return RiskLevel.HIGH
         return RiskLevel.LOW
@@ -82,7 +89,9 @@ class FilterGateLearner:
         for kw in KNOWN_KEYWORDS:
             if kw.upper() in upper:
                 matched.append(kw)
-        for kw in self.learned_keywords:
+        for kw, evidence in self.learned_keywords.items():
+            if evidence.count < LEARNED_PROMOTION_THRESHOLD:
+                continue
             if kw.upper() in upper:
                 matched.append(kw)
         return matched
