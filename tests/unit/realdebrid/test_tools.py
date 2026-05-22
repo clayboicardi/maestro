@@ -43,6 +43,7 @@ async def test_check_cache_overlays_filter_gate(toolset: RDToolset) -> None:
         infohashes=["abc", "def"],
         filenames={"abc": "S01E03.WEB-DL.AMZN.mkv", "def": "S01E03.BluRay.mkv"},
     )
+    assert [r["hash"] for r in result] == ["abc", "def"]  # input order preserved
     abc = next(r for r in result if r["hash"] == "abc")
     deff = next(r for r in result if r["hash"] == "def")
     assert abc["cached"] is True
