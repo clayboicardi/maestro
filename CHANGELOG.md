@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - `diagnose_stack_health`, `diagnose_rd_health`, `diagnose_dud_rate` now declare `idempotentHint=false`. They sample changing upstream state (RD account, addon reachability, filter-gate strikes), so repeated invocations are not equivalent and MCP clients should not memoize their results.
+- `SchemaError.suggestion` default is now `None`. The previous default text was AIOStreams-specific ("Run scripts/regen_aiostreams_schemas.sh..."), but `SchemaError` is generic across domains. Each raise site now passes a domain-appropriate suggestion explicitly.
 
 ## [0.1.0] — 2026-05-22
 
