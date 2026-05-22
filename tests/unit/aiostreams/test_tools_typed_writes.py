@@ -4,7 +4,8 @@ from typing import Any
 
 import pytest
 
-from maestro.aiostreams.tools import AIOStreamsToolset
+from maestro.aiostreams.schemas_generated import ExcludedResolution
+from maestro.aiostreams.tools import _RESOLUTION_LADDER, AIOStreamsToolset
 
 
 @pytest.fixture
@@ -43,7 +44,7 @@ async def test_set_cached_only_stages_boolean(toolset: AIOStreamsToolset) -> Non
 async def test_set_resolution_floor_excludes_below(toolset: AIOStreamsToolset) -> None:
     mutation = await toolset.set_resolution_floor("720p")
     assert mutation.field == "filters.excluded_resolutions"
-    assert set(mutation.to) >= {"240p", "360p", "480p"}
+    assert set(mutation.to) == {"144p", "240p", "360p", "480p", "576p"}
     assert "720p" not in mutation.to
 
 
@@ -58,3 +59,15 @@ async def test_set_core_engine_accepts_valid_values(toolset: AIOStreamsToolset) 
 async def test_set_core_engine_rejects_invalid_value(toolset: AIOStreamsToolset) -> None:
     with pytest.raises(ValueError, match="engine must be one of"):
         await toolset.set_core_engine("Made-up Engine")
+
+
+def test_resolution_ladder_is_subset_of_schema_enum() -> None:
+    """Ladder values MUST be a subset of AIOStreams' ExcludedResolution enum.
+
+    Catches schema-drift breakage when scripts/regen_aiostreams_schemas.sh
+    pulls a newer upstream that changes the resolution vocabulary.
+    """
+    valid = {r.value for r in ExcludedResolution}
+    assert set(_RESOLUTION_LADDER) <= valid, (
+        f"ladder values not in schema enum: {set(_RESOLUTION_LADDER) - valid}"
+    )

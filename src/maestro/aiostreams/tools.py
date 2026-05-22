@@ -14,6 +14,22 @@ log = structlog.get_logger("maestro.aiostreams.tools")
 
 REDACTED = "***REDACTED***"
 
+# Resolution floor ladder — must remain a subset of
+# maestro.aiostreams.schemas_generated.ExcludedResolution.
+# Ordered lowest→highest. "Unknown" intentionally excluded since it
+# is a catch-all bucket, not an ordinal resolution.
+_RESOLUTION_LADDER: list[str] = [
+    "144p",
+    "240p",
+    "360p",
+    "480p",
+    "576p",
+    "720p",
+    "1080p",
+    "1440p",
+    "2160p",
+]
+
 
 def _redact_secrets(config: dict[str, Any]) -> dict[str, Any]:
     out = deepcopy(config)
@@ -93,44 +109,37 @@ class AIOStreamsToolset:
         """
         return []
 
+    async def _stage_filter(self, *, key: str, value: Any) -> PendingMutation:
+        """Internal helper: stage a write under `filters.<key>`.
+
+        Used by typed filter setters and (Task 3.7's) generic `set_filter`.
+        """
+        return await self._stager.modify(
+            lambda cfg: {**cfg, "filters": {**cfg.get("filters", {}), key: value}},
+            field=f"filters.{key}",
+        )
+
     async def set_preferred_languages(self, languages: list[str]) -> PendingMutation:
         """Stage `filters.preferred_languages`. Order matters - first is primary."""
-        return await self._stager.modify(
-            lambda cfg: {
-                **cfg,
-                "filters": {**cfg.get("filters", {}), "preferred_languages": list(languages)},
-            },
-            field="filters.preferred_languages",
-        )
+        return await self._stage_filter(key="preferred_languages", value=list(languages))
 
     async def set_cached_only(self, *, enabled: bool) -> PendingMutation:
         """Stage `filters.only_cached`. When true, AIOStreams returns only RD-cached streams."""
-        return await self._stager.modify(
-            lambda cfg: {
-                **cfg,
-                "filters": {**cfg.get("filters", {}), "only_cached": enabled},
-            },
-            field="filters.only_cached",
-        )
+        return await self._stage_filter(key="only_cached", value=enabled)
 
     async def set_resolution_floor(self, min_resolution: str) -> PendingMutation:
         """Exclude all resolutions below `min_resolution`.
 
-        Valid values: 240p, 360p, 480p, 720p, 1080p, 1440p, 4K, 8K.
+        Valid values: 144p, 240p, 360p, 480p, 576p, 720p, 1080p, 1440p, 2160p.
+        (Matches AIOStreams' ExcludedResolution enum minus "Unknown".)
         """
-        ladder = ["240p", "360p", "480p", "720p", "1080p", "1440p", "4K", "8K"]
-        if min_resolution not in ladder:
-            raise ValueError(f"min_resolution must be one of {ladder}, got {min_resolution!r}")
-        index = ladder.index(min_resolution)
-        excluded = ladder[:index]
-
-        return await self._stager.modify(
-            lambda cfg: {
-                **cfg,
-                "filters": {**cfg.get("filters", {}), "excluded_resolutions": excluded},
-            },
-            field="filters.excluded_resolutions",
-        )
+        if min_resolution not in _RESOLUTION_LADDER:
+            raise ValueError(
+                f"min_resolution must be one of {_RESOLUTION_LADDER}, got {min_resolution!r}"
+            )
+        index = _RESOLUTION_LADDER.index(min_resolution)
+        excluded = _RESOLUTION_LADDER[:index]
+        return await self._stage_filter(key="excluded_resolutions", value=excluded)
 
     async def set_core_engine(self, engine: str) -> PendingMutation:
         """Set the SEL core engine. Valid: 'Standard SEL - 3 per Q/R', 'Extended SEL - 6 per Q/R'."""
