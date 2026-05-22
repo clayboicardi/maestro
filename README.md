@@ -2,7 +2,7 @@
 
 > MCP server giving AI agents programmatic control over Stremio + Real-Debrid stacks.
 
-**Status:** Pre-release (v0.1.0). 7 of 10 phases locked. See [docs/specs/2026-05-21-maestro-design.md](docs/specs/2026-05-21-maestro-design.md) for the design spec.
+**Status:** Pre-release (v0.1.0). 8 of 10 phases locked. See [docs/specs/2026-05-21-maestro-design.md](docs/specs/2026-05-21-maestro-design.md) for the design spec.
 
 ## What it does
 
@@ -19,11 +19,11 @@ Maestro is a local Python MCP server that lets an AI agent (Claude Code, Cursor,
 | 4 | Torrentio domain (URL encoder + 5 MCP tools) | Locked 2026-05-21 |
 | 5 | Real-Debrid domain (async client + filter-gate learner + 7 MCP tools) | Locked 2026-05-22 |
 | 6 | Stremio addon protocol domain (generic client + 6 MCP tools) | Locked 2026-05-22 |
-| 7 | `find_best_stream` composer | Next |
-| 8 | Diagnostics | Pending |
+| 7 | `find_best_stream` composer (the killer feature) | Locked 2026-05-22 |
+| 8 | Diagnostics | Next |
 | 9 | Release readiness | Pending |
 
-Tool surface: 39 MCP tools (21 AIOStreams + 5 Torrentio + 7 Real-Debrid + 6 Stremio). Test suite: 154 passing.
+Tool surface: 40 MCP tools (21 AIOStreams + 5 Torrentio + 7 Real-Debrid + 6 Stremio + 1 `find_best_stream`). Test suite: 172 passing.
 
 ## Install
 
