@@ -28,7 +28,7 @@ pytestmark = pytest.mark.schema_fidelity
 
 @pytest.mark.skipif(
     os.environ.get("CI") != "true" and not PINNED_SHA_FILE.exists(),
-    reason="Pinned SHA file missing - run pytest with --update-schema-pin to seed",
+    reason="Pinned SHA file missing - run scripts/regen_aiostreams_schemas.sh and seed the SHA file from the same URL",
 )
 def test_upstream_schema_matches_pinned_sha() -> None:
     """Live schemas.ts at PINNED_TAG must match the recorded SHA256."""
