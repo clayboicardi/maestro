@@ -1,0 +1,21 @@
+name: Smoke
+
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    env:
+      MAESTRO_SMOKE: "1"
+      MAESTRO_RD_TOKEN: ${{ secrets.MAESTRO_RD_TOKEN }}
+      MAESTRO_AIOSTREAMS_BASE_URL: ${{ secrets.MAESTRO_AIOSTREAMS_BASE_URL }}
+      MAESTRO_AIOSTREAMS_UUID: ${{ secrets.MAESTRO_AIOSTREAMS_UUID }}
+      MAESTRO_AIOSTREAMS_PASSWORD: ${{ secrets.MAESTRO_AIOSTREAMS_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - run: uv sync --frozen
+      - run: uv run pytest tests/smoke -v -m smoke
