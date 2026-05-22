@@ -7,6 +7,7 @@ import pytest
 
 from maestro.aiostreams.tools import (
     AIOStreamsToolset,
+    _redact_secrets,
 )
 
 
@@ -152,3 +153,57 @@ async def test_get_template_list_returns_known_templates(toolset: AIOStreamsTool
     assert len(templates) >= 1
     names = [t["name"] for t in templates]
     assert "Tamtaro Complete SEL Setup v2.6.1" in names
+
+
+# --- Defensive redaction tests (G-fix-1, R-2, R-3 from PR #7 octo:review cycle) ---
+
+
+def test_redact_secrets_handles_null_services_field() -> None:
+    """G-fix-1: `services: null` (per upstream schema) does not raise TypeError."""
+    config: dict[str, Any] = {"services": None, "tmdbApiKey": "leak_me"}
+    result = _redact_secrets(config)
+    assert result["services"] is None
+    assert result["tmdbApiKey"] == "***REDACTED***"
+
+
+def test_redact_secrets_handles_missing_services_field() -> None:
+    """G-fix-1: absent `services` key does not raise."""
+    config: dict[str, Any] = {"tmdbApiKey": "leak_me"}
+    result = _redact_secrets(config)
+    assert "services" not in result
+    assert result["tmdbApiKey"] == "***REDACTED***"
+
+
+def test_redact_secrets_redacts_non_dict_service_credentials() -> None:
+    """R-3: non-dict `services[].credentials` value (legacy schema or malformed upstream)
+    gets defensively redacted (replaced wholesale with REDACTED string) rather than
+    silently bypassed.
+    """
+    config: dict[str, Any] = {
+        "services": [
+            {
+                "id": "legacy_service",
+                "credentials": "legacy_string_token_should_not_leak",
+                "enabled": True,
+            }
+        ]
+    }
+    result = _redact_secrets(config)
+    assert result["services"][0]["credentials"] == "***REDACTED***"
+    assert result["services"][0]["id"] == "legacy_service"
+
+
+def test_redact_secrets_handles_dict_proxy_credentials() -> None:
+    """R-2: defensive support for hypothetical Proxy2 schema evolution where
+    `proxy.credentials` becomes a dict (mirroring Service5.credentials).
+    """
+    config: dict[str, Any] = {
+        "proxy": {
+            "enabled": True,
+            "url": "https://proxy.example",
+            "credentials": {"apiKey": "future_proxy_secret"},
+        }
+    }
+    result = _redact_secrets(config)
+    assert result["proxy"]["credentials"] == {"apiKey": "***REDACTED***"}
+    assert result["proxy"]["url"] == "https://proxy.example"

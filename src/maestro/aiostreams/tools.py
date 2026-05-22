@@ -63,16 +63,32 @@ def _redact_secrets(config: dict[str, Any]) -> dict[str, Any]:
     1. ``services[].credentials`` -- a ``dict[str, str]`` keyed by
        credential name (e.g. ``{"apiKey": "rd_..."}``). Each value is
        replaced with ``REDACTED``; keys are preserved so callers know
-       which credential names are configured.
+       which credential names are configured. If a service entry
+       carries a non-dict credentials value (legacy schema or
+       malformed upstream), the value is replaced wholesale with
+       ``REDACTED`` and a warning is logged so unexpected shapes
+       surface in operations.
     2. Top-level API tokens and passwords listed in
        :data:`_TOP_LEVEL_SECRET_KEYS`. Each present key's value is
-       replaced with ``REDACTED``; absent keys remain absent.
-    3. ``proxy.credentials`` (Proxy2 schema, optional) -- present only
-       when an upstream proxy is configured. Replaced with ``REDACTED``.
+       replaced with ``REDACTED``; absent keys remain absent. A
+       schema-fidelity test
+       (``tests/schema_fidelity/test_secret_keys_coverage.py``) enforces
+       that every UserDataSchema top-level field matching a
+       sensitive-suffix regex appears in this tuple, so upstream schema
+       additions surface in CI rather than silently leaking.
+    3. ``proxy.credentials`` (Proxy2 schema, currently ``str | None``
+       per upstream). The dict shape is handled defensively in case the
+       schema evolves like ``services.credentials`` did -- string
+       values get the wholesale ``REDACTED`` replacement; dict values
+       get ``dict.fromkeys(creds, REDACTED)``.
 
     Any read path that surfaces config through an MCP tool MUST call
     this redactor unless the caller has explicitly opted into
     ``include_secrets``.
+
+    Defensive against null/missing fields: ``services: None``,
+    ``services`` absent, and ``proxy: None`` are all safe no-ops for
+    that section.
 
     Implementation note: the deepcopy is load-bearing because
     ``services`` is a list of dicts -- a shallow outer copy would share
@@ -84,21 +100,36 @@ def _redact_secrets(config: dict[str, Any]) -> dict[str, Any]:
     """
     out = deepcopy(config)
 
-    # Per-service credentials (dict of credential-name -> value).
-    for service in out.get("services", []):
+    # Per-service credentials (dict of credential-name -> value per schema;
+    # `or []` guards against the upstream `services: null` case; non-dict
+    # creds get defensively redacted + logged so schema drift surfaces).
+    for service in out.get("services") or []:
         creds = service.get("credentials")
         if isinstance(creds, dict):
             service["credentials"] = dict.fromkeys(creds, REDACTED)
+        elif creds is not None:
+            log.warning(
+                "aiostreams_unexpected_credentials_type",
+                type=type(creds).__name__,
+                service_id=service.get("id"),
+            )
+            service["credentials"] = REDACTED
 
     # Top-level sensitive fields.
     for key in _TOP_LEVEL_SECRET_KEYS:
         if key in out:
             out[key] = REDACTED
 
-    # Optional proxy credentials (Proxy2 surface).
+    # Optional proxy credentials (Proxy2 surface; currently str | None per
+    # schema, dict shape handled defensively in case Proxy2 evolves the
+    # way Service5 did).
     proxy = out.get("proxy")
-    if isinstance(proxy, dict) and "credentials" in proxy:
-        proxy["credentials"] = REDACTED
+    if isinstance(proxy, dict):
+        proxy_creds = proxy.get("credentials")
+        if isinstance(proxy_creds, dict):
+            proxy["credentials"] = dict.fromkeys(proxy_creds, REDACTED)
+        elif proxy_creds is not None:
+            proxy["credentials"] = REDACTED
 
     return out
 
