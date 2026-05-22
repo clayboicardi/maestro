@@ -115,9 +115,7 @@ def register_tools(
 
     mcp.tool(
         name="diagnose_stack_health",
-        annotations=read_only(
-            title="Probe Addon Stack Health", idempotent=False
-        ).model_dump(),
+        annotations=read_only(title="Probe Addon Stack Health", idempotent=False).model_dump(),
     )(toolset.stack_health)
     mcp.tool(
         name="diagnose_rd_health",

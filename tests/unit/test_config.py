@@ -69,11 +69,7 @@ def test_required_fields_locked() -> None:
     or a required field is renamed, this test fails -- forcing intentional
     review of the configuration contract that operators rely on.
     """
-    required = {
-        name
-        for name, field in MaestroSettings.model_fields.items()
-        if field.is_required()
-    }
+    required = {name for name, field in MaestroSettings.model_fields.items() if field.is_required()}
     assert required == {
         "rd_token",
         "aiostreams_base_url",
