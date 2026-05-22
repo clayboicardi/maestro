@@ -30,6 +30,9 @@ class MaestroError(BaseModel):
     is_transient: bool = False
 
 
+# --- Auth + connectivity (apply to any HTTP-backed domain) ---
+
+
 class AuthError(MaestroError):
     code: str = "auth_error"
     message: str = "Authentication failed"
@@ -48,6 +51,9 @@ class RateLimitError(MaestroError):
     is_transient: bool = True
 
 
+# --- Schema + upstream contract drift ---
+
+
 class SchemaError(MaestroError):
     code: str = "schema_error"
     message: str = "Schema mismatch — upstream may have changed"
@@ -59,6 +65,9 @@ class UpstreamError(MaestroError):
     code: str = "upstream_error"
     message: str = "Upstream returned a server error"
     is_transient: bool = True
+
+
+# --- Stremio addon-protocol failures ---
 
 
 class AddonTimeout(MaestroError):
@@ -73,7 +82,17 @@ class AddonMalformed(MaestroError):
     is_transient: bool = False
 
 
+# --- Real-Debrid filter-gate ---
+
+
 class FilterGateStrike(MaestroError):
+    """Recorded when RD's May 2026 filter-gate blocks a previously-cached file.
+
+    Carries the offending filename, the RD error code, and any keywords
+    the runtime learner extracted so the composer can avoid sibling
+    candidates that share the same trigger pattern.
+    """
+
     code: str = "filter_gate_strike"
     domain: str = "realdebrid"
     message: str = "RD blocked file under May 2026 filter-gate"
@@ -82,6 +101,9 @@ class FilterGateStrike(MaestroError):
     filename: str
     rd_error_code: str
     learned_keywords: list[str] = Field(default_factory=list)
+
+
+# --- Composer (find_best_stream) ---
 
 
 class NoStreamsAvailable(MaestroError):
@@ -96,6 +118,13 @@ class TitleUnresolved(MaestroError):
 
 
 class CompositionFailure(MaestroError):
+    """Returned when the composer exhausted all candidates without resolving.
+
+    ``attempts`` carries one dict per candidate tried, with whatever the
+    composer recorded for debugging (rejection reason, RD response code,
+    filter-gate strike payload, etc.).
+    """
+
     code: str = "composition_failure"
     domain: str = "compose"
     attempts: list[dict[str, Any]] = Field(default_factory=list)

@@ -23,8 +23,14 @@ def configure_logging(
 ) -> None:
     """Configure structlog + stdlib logging for the MCP server.
 
-    Routes all output to stderr. JSON format for production (machine-readable);
-    console format for human-facing dev runs.
+    Routes all output to stderr because stdio MCP servers reserve stdout
+    for the JSON-RPC frame — anything written to stdout corrupts the
+    protocol stream and breaks the client. ``logging.basicConfig`` is
+    called with ``force=True`` to dislodge any prior handlers that might
+    default to stdout.
+
+    ``json`` format is the production default (machine-readable);
+    ``console`` format is for human-facing dev runs only.
     """
     log_level = getattr(logging, level)
 

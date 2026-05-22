@@ -48,10 +48,20 @@ class ToolAnnotations(BaseModel):
 
 
 def read_only(*, title: str, idempotent: bool = True) -> ToolAnnotations:
+    """Tools that observe state but never modify it (GET-shaped operations).
+
+    Idempotent by default; pass ``idempotent=False`` for read tools whose
+    repeated calls measure or sample changing state (e.g., health probes).
+    """
     return ToolAnnotations(title=title, readOnlyHint=True, idempotentHint=idempotent)
 
 
 def destructive(*, title: str) -> ToolAnnotations:
+    """Tools that mutate external state irreversibly (DELETE-shaped + replace-shaped).
+
+    Claude clients surface the ``destructiveHint`` flag to gate user
+    confirmation before invocation, so this is load-bearing for safety.
+    """
     return ToolAnnotations(title=title, destructiveHint=True)
 
 

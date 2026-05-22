@@ -14,7 +14,33 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class MaestroSettings(BaseSettings):
-    """Server-wide settings, loaded once at startup."""
+    """Server-wide settings, loaded once at startup.
+
+    All vars use the ``MAESTRO_`` prefix and are case-insensitive
+    (``MAESTRO_RD_TOKEN`` and ``maestro_rd_token`` both bind).
+
+    Required (no default; raises ``ValidationError`` if missing):
+
+    - ``MAESTRO_RD_TOKEN`` — Real-Debrid API token (``SecretStr``)
+    - ``MAESTRO_AIOSTREAMS_BASE_URL`` — AIOStreams instance URL
+    - ``MAESTRO_AIOSTREAMS_UUID`` — per-user UUID
+    - ``MAESTRO_AIOSTREAMS_PASSWORD`` — basic-auth password (``SecretStr``)
+
+    Optional (sensible defaults):
+
+    - ``MAESTRO_TORRENTIO_BASE_URL`` — defaults to public Torrentio
+    - ``MAESTRO_HTTP_TIMEOUT_S`` — per-request timeout, default 15s
+    - ``MAESTRO_RETRY_ATTEMPTS`` — per-domain retry budget, default 3
+    - ``MAESTRO_COMPOSE_BUDGET_S`` — total composer budget, default 60s
+    - ``MAESTRO_COMPOSE_CANDIDATE_TIMEOUT_S`` — per-candidate within composer, default 10s
+    - ``MAESTRO_LOG_FORMAT`` — ``json`` (default) or ``console``
+    - ``MAESTRO_LOG_LEVEL`` — standard stdlib level, default ``INFO``
+    - ``MAESTRO_FILTER_GATE_STATE_PATH`` — persistent filter-gate state, default ``~/.config/maestro/filter_gate_state.json``
+
+    Secrets use ``SecretStr`` so they never appear in repr output or
+    structured-log dumps. Compare with ``.get_secret_value()``; Pydantic
+    v2's ``SecretStr.__eq__`` does NOT compare to plain strings.
+    """
 
     model_config = SettingsConfigDict(
         env_prefix="MAESTRO_",

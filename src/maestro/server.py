@@ -1,7 +1,10 @@
 """Maestro MCP server entry point.
 
-Boots a FastMCP stdio server. Tools land here via domain-module
-register_* functions in later phases.
+Boots a FastMCP stdio server with all six domains wired (AIOStreams,
+Torrentio, Real-Debrid, Stremio, Compose, Diagnose) and the
+``MaestroErrorMiddleware`` installed at the tool boundary. Settings
+load once from environment via ``MaestroSettings``; logging routes
+to stderr per the stdio rule (stdout carries the JSON-RPC frame).
 """
 
 from __future__ import annotations
@@ -42,8 +45,15 @@ def _strip_userinfo(url: str) -> str:
 def create_server() -> FastMCP:
     """Construct and return the configured FastMCP app.
 
-    Reads settings from env, configures logging, registers domain tools,
-    returns the wired app.
+    Sequence:
+    1. Load ``MaestroSettings`` from env (raises ``ValidationError`` on
+       missing required vars).
+    2. Configure stderr-only structlog at the requested level + format.
+    3. Install ``MaestroErrorMiddleware`` so every tool's ``MaestroException``
+       becomes a structured MCP error at the wire boundary.
+    4. Register the six domain toolsets, threading shared dependencies
+       (RD toolset's client + learner are reused by Compose and Diagnose
+       to avoid duplicate state).
     """
     settings = MaestroSettings()  # pyright: ignore[reportCallIssue] - pydantic-settings sources required fields from env
     configure_logging(format=settings.log_format, level=settings.log_level)

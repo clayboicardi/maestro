@@ -22,10 +22,20 @@ log = structlog.get_logger("maestro.middleware")
 class MaestroErrorMiddleware(Middleware):
     """Translate Maestro exceptions to structured MCP errors at the tool boundary.
 
-    Contract:
-    - MaestroException -> McpError(-32603) with the structured MaestroError payload in `data`
-    - pydantic.ValidationError -> McpError(-32602 Invalid params) with field errors in `data`
-    - Other exceptions propagate to FastMCP's default handler (don't swallow)
+    Contract (every entry is load-bearing):
+
+    1. ``MaestroException`` -> ``McpError`` with JSON-RPC code ``-32603``
+       (Internal error) and the structured ``MaestroError`` payload serialized
+       into ``data``. Tools raise ``MaestroException(SomeError(...))``; this
+       middleware is the only place that converts it to a wire response, so
+       no per-tool try/except boilerplate is required.
+    2. ``pydantic.ValidationError`` -> ``McpError`` with JSON-RPC code
+       ``-32602`` (Invalid params) and the field-level errors in ``data``.
+       Catches input-schema mismatches surfaced by FastMCP's argument
+       validation layer.
+    3. Any other exception propagates unchanged to FastMCP's default handler
+       — never swallow unknown errors. Loud failures are debuggable; silent
+       failures are not.
     """
 
     async def on_call_tool(
