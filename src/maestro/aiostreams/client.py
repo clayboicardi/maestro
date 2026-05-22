@@ -13,7 +13,12 @@ from typing import Any
 
 import httpx
 import structlog
-from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
+from tenacity import (
+    AsyncRetrying,
+    retry_if_exception,
+    stop_after_attempt,
+    wait_exponential,
+)
 
 from maestro.errors import AuthError, InstanceError, MaestroException, UpstreamError
 
@@ -61,13 +66,8 @@ class AIOStreamsClient:
             await self._client.aclose()
             self._client = None
 
-    @retry(
-        retry=retry_if_exception(_is_transient),
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(min=1, max=4),
-        reraise=True,
-    )
-    async def _request(self, method: str, json: dict[str, Any] | None = None) -> httpx.Response:
+    async def _do_request(self, method: str, json: dict[str, Any] | None = None) -> httpx.Response:
+        """Single attempt: issue the request and translate status codes to MaestroException."""
         client = await self._get_client()
         try:
             response = await client.request(method, self._user_url, json=json)
@@ -100,6 +100,21 @@ class AIOStreamsClient:
                     message=f"upstream {response.status_code}",
                 )
             )
+        return response
+
+    async def _request(self, method: str, json: dict[str, Any] | None = None) -> httpx.Response:
+        """Retry-wrapped request honoring per-instance retry_attempts."""
+        response: httpx.Response | None = None
+        async for attempt in AsyncRetrying(
+            retry=retry_if_exception(_is_transient),
+            stop=stop_after_attempt(self._retry_attempts),
+            wait=wait_exponential(min=1, max=4),
+            reraise=True,
+        ):
+            with attempt:
+                response = await self._do_request(method, json)
+        # AsyncRetrying guarantees response is set on success (else it reraises).
+        assert response is not None
         return response
 
     async def get_config(self) -> dict[str, Any]:

@@ -62,7 +62,27 @@ async def test_get_config_500_retries_then_raises(client: AIOStreamsClient) -> N
     with pytest.raises(MaestroException) as exc_info:
         await client.get_config()
     assert isinstance(exc_info.value.error, UpstreamError)
-    assert route.call_count >= 1
+    assert route.call_count == 3  # default retry_attempts
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_get_config_500_respects_custom_retry_attempts() -> None:
+    """retry_attempts ctor arg controls actual attempt count."""
+    custom_client = AIOStreamsClient(
+        base_url="https://aiostreams.elfhosted.com",
+        uuid="user-uuid-1234",
+        password="secret-pw",
+        timeout_s=5.0,
+        retry_attempts=2,
+    )
+    route = respx.get("https://aiostreams.elfhosted.com/api/v1/user/user-uuid-1234").mock(
+        return_value=httpx.Response(500)
+    )
+
+    with pytest.raises(MaestroException):
+        await custom_client.get_config()
+    assert route.call_count == 2
 
 
 @respx.mock
