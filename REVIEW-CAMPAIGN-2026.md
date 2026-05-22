@@ -22,15 +22,15 @@ A finding qualifies as **Must-fix** when at least two of the three reviewers fla
 
 ## Audit Findings (compressed)
 
-- **Repo snapshot:** HEAD `baffba9` (the v0.1.0 lock commit), 77 commits in the last six months — which is the entire repo history; the project shipped all nine implementation phases plus release readiness in ~30 hours across 2026-05-21 and 2026-05-22.
+- **Repo snapshot:** HEAD `baffba9` (the v0.1.0 lock commit), 77 commits in the last six months — which is the entire repo history; the project shipped its initial implementation and release readiness in ~30 hours across 2026-05-21 and 2026-05-22.
 - **Top subsystems by source file count:** `aiostreams/` (7), `torrentio/` (4), `realdebrid/` (4), `stremio/` (3), `compose/` (3), `diagnose/` (3), plus seven cross-cutting top-level modules (`server.py`, `errors.py`, `middleware.py`, `annotations.py`, `config.py`, `logging.py`, `__init__.py`).
 - **Per-domain handwritten LoC:** `aiostreams/` ~765 (plus 2266 LoC of auto-generated schemas excluded from review), `realdebrid/` 594, `compose/` 521, `stremio/` 421, `torrentio/` 325, `diagnose/` 200. Cross-cutting top-level modules total ~370 LoC.
-- **Recent hotspots:** `src/maestro/server.py` (12 commits), `src/maestro/aiostreams/tools.py` (10), `README.md` (8), `pyproject.toml` (7), `src/maestro/annotations.py` (4). Hotspot pattern matches phase progression — `server.py` evolves every phase as new domains wire in, `aiostreams/tools.py` reflects the 21-tool build-out.
+- **Recent hotspots:** `src/maestro/server.py` (12 commits), `src/maestro/aiostreams/tools.py` (10), `README.md` (8), `pyproject.toml` (7), `src/maestro/annotations.py` (4). Hotspot pattern matches development progression — `server.py` evolves as new domains wire in, `aiostreams/tools.py` reflects the 21-tool build-out.
 - **Existing audit artifacts:** none in-repo. The pre-v0.1.0 audit trail lived in working sessions; this is the first formal post-release audit.
 - **Test coverage signal:** 34 test files against 31 handwritten source files. Tests cover every domain; the breakdown is 32 unit, 7 integration (one tool-registration test per domain), 3 schema-fidelity, and 2 smoke (smoke is opt-in via `MAESTRO_SMOKE=1`). Coverage measured locally at ~92%.
 - **CI gates currently enforced:** ruff lint, ruff format check, basedpyright type check, pytest across Python 3.12, 3.13, and 3.14. A nightly smoke workflow runs the same opt-in live-upstream tests against pinned Action secrets; the first manual dispatch ran SUCCESS on 2026-05-22 in 19 seconds.
 - **CI gap surfaced by the audit:** `pyproject.toml` declares `[tool.coverage.report] fail_under = 75`, but the CI workflow runs `pytest` without `--cov`, so the threshold is declared but not enforced. The ~92% coverage figure in README and CHANGELOG is a local-run artifact, not a CI guarantee. A one-line CI fix to gate this is a known follow-up; review PR 8 may surface it independently as part of the CI hardening pass.
-- **TODO/FIXME density:** one marker total, and inspection shows it's a false positive — the implementation-plan document itself asserts "no TODO patterns" in its own text. True in-code TODO debt is zero. Deferred items live outside the source tree rather than as in-code markers.
+- **TODO/FIXME density:** one marker total, and inspection shows it's a false positive — the project documentation itself asserts "no TODO patterns" in its own text. True in-code TODO debt is zero. Deferred items live outside the source tree rather than as in-code markers.
 
 ## Locked Subsystem Inventory
 
@@ -155,7 +155,7 @@ Total review PRs: 8.
 ## Repo-Specific Notes
 
 - **Default branch:** `master` (not `main`). Every review PR and every fix PR targets `master`.
-- **Verification per PR (Phase 1 Step 13):** the project's standard quality gate, which mirrors `.github/workflows/ci.yaml` exactly with the addition of `ruff format --check` per the developer-notes hard invariant that `ruff check` and `ruff format --check` are distinct.
+- **Verification per PR:** the project's standard quality gate, which mirrors `.github/workflows/ci.yaml` exactly with the addition of `ruff format --check` to enforce the invariant that `ruff check` and `ruff format --check` are distinct.
 
   ```bash
   uv run pytest tests/unit tests/schema_fidelity tests/integration \
