@@ -16,10 +16,10 @@ def test_create_server_returns_fastmcp_instance(monkeypatch: pytest.MonkeyPatch)
     assert mcp.name == "maestro"
 
 
-async def test_create_server_registers_no_tools_initially(
+async def test_create_server_registers_aiostreams_tools(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Phase 1 server has zero tools registered -- domain tools land in later phases."""
+    """create_server() wires the 21 AIOStreams tools via aiostreams.register_tools."""
     monkeypatch.setenv("MAESTRO_RD_TOKEN", "x")
     monkeypatch.setenv("MAESTRO_AIOSTREAMS_BASE_URL", "https://x.com")
     monkeypatch.setenv("MAESTRO_AIOSTREAMS_UUID", "x")
@@ -27,7 +27,8 @@ async def test_create_server_registers_no_tools_initially(
 
     mcp = create_server()
     tools = await mcp.list_tools()
-    assert len(tools) == 0
+    aiostreams_tools = [t for t in tools if t.name.startswith("aiostreams_")]
+    assert len(aiostreams_tools) == 21
 
 
 def test_strip_userinfo_with_creds() -> None:

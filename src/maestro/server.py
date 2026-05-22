@@ -12,6 +12,7 @@ from urllib.parse import urlsplit, urlunsplit
 import structlog
 from fastmcp import FastMCP
 
+from maestro.aiostreams import register_tools as register_aiostreams
 from maestro.config import MaestroSettings
 from maestro.logging import configure_logging
 
@@ -35,8 +36,8 @@ def _strip_userinfo(url: str) -> str:
 def create_server() -> FastMCP:
     """Construct and return the configured FastMCP app.
 
-    Reads settings from env, configures logging, returns the bare app
-    without tools. Domain register_* functions wire tools.
+    Reads settings from env, configures logging, registers domain tools,
+    returns the wired app.
     """
     settings = MaestroSettings()  # pyright: ignore[reportCallIssue] - pydantic-settings sources required fields from env
     configure_logging(format=settings.log_format, level=settings.log_level)
@@ -50,6 +51,7 @@ def create_server() -> FastMCP:
     )
 
     mcp = FastMCP(name="maestro")
+    register_aiostreams(mcp, settings)
     return mcp
 
 
