@@ -115,14 +115,20 @@ def register_tools(
 
     mcp.tool(
         name="diagnose_stack_health",
-        annotations=read_only(title="Probe Addon Stack Health").model_dump(),
+        annotations=read_only(
+            title="Probe Addon Stack Health", idempotent=False
+        ).model_dump(),
     )(toolset.stack_health)
     mcp.tool(
         name="diagnose_rd_health",
-        annotations=read_only(title="Probe Real-Debrid Auth + Filter-Gate State").model_dump(),
+        annotations=read_only(
+            title="Probe Real-Debrid Auth + Filter-Gate State", idempotent=False
+        ).model_dump(),
     )(toolset.rd_health)
     mcp.tool(
         name="diagnose_dud_rate",
-        annotations=read_only(title="Dud-Rate Telemetry (v1.x stub)").model_dump(),
+        annotations=read_only(
+            title="Dud-Rate Telemetry (v1.x stub)", idempotent=False
+        ).model_dump(),
     )(toolset.dud_rate)
     return toolset
