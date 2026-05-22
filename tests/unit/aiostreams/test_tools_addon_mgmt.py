@@ -61,3 +61,10 @@ async def test_toggle_addon_flips_enabled(toolset: AIOStreamsToolset) -> None:
     mutation = await toolset.toggle_addon("Comet", enabled=False)
     target = next(a for a in mutation.to if a["name"] == "Comet")
     assert target["enabled"] is False
+
+
+@pytest.mark.asyncio
+async def test_toggle_addon_unknown_raises(toolset: AIOStreamsToolset) -> None:
+    """Symmetry with remove: toggle on a missing addon also raises ValueError."""
+    with pytest.raises(ValueError, match="not found"):
+        await toolset.toggle_addon("NonexistentAddon", enabled=False)

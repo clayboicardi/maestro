@@ -175,11 +175,10 @@ class AIOStreamsToolset:
 
         def transform(cfg: dict[str, Any]) -> dict[str, Any]:
             addons = list(cfg.get("addons", []))
-            for a in addons:
-                if a.get("name") == addon_name:
-                    addons.remove(a)
-                    return {**cfg, "addons": addons}
-            raise ValueError(f"Addon {addon_name!r} not found in current config")
+            filtered = [a for a in addons if a.get("name") != addon_name]
+            if len(filtered) == len(addons):
+                raise ValueError(f"Addon {addon_name!r} not found in current config")
+            return {**cfg, "addons": filtered}
 
         return await self._stager.modify(transform, field="addons")
 
@@ -187,6 +186,9 @@ class AIOStreamsToolset:
         """Enable or disable an aggregated addon without removing it."""
 
         def transform(cfg: dict[str, Any]) -> dict[str, Any]:
+            # Shallow-copy each entry so we can mutate the found dict in place
+            # without aliasing the baseline (add/remove only restructure the
+            # list; toggle alone touches a dict's contents).
             addons = [dict(a) for a in cfg.get("addons", [])]
             for a in addons:
                 if a.get("name") == addon_name:
