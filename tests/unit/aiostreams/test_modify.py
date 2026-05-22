@@ -59,6 +59,23 @@ async def test_modify_caches_baseline_across_calls() -> None:
     pending = stager.pending_mutations()
     assert len(pending) == 2
 
+    # Verify the second mutation actually captures its own value
+    assert pending[0].to == ["English"]
+    assert pending[1].to == ["480p"]
+
+    # And verify save() PUTs the stacked state (proves stacking happens for real)
+    put_bodies: list[dict[str, Any]] = []
+
+    async def capturing_put(body: dict[str, Any]) -> dict[str, Any]:
+        put_bodies.append(body)
+        return {"ok": True}
+
+    stager._put_config = capturing_put  # swap in for save observation
+    await stager.save()
+
+    assert put_bodies[0]["filters"]["preferred_languages"] == ["English"]
+    assert put_bodies[0]["filters"]["excluded_resolutions"] == ["480p"]
+
 
 @pytest.mark.asyncio
 async def test_save_flushes_via_put_and_clears_staging() -> None:

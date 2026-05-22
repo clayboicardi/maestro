@@ -27,8 +27,6 @@ class PendingMutation(BaseModel):
     from_: Any = None
     to: Any = None
 
-    model_config = {"populate_by_name": True}
-
 
 class ConfigStager:
     """Manages staged AIOStreams config writes for one user session."""
@@ -89,7 +87,13 @@ class ConfigStager:
 
 
 def _resolve_dotted(d: ConfigDict, path: str) -> Any:
-    """Walk a dot-delimited path through nested dicts; return None on miss."""
+    """Walk a dot-delimited path through nested dicts; return None on miss.
+
+    Note: a return of None is ambiguous — it can mean either "path not
+    present" or "value at path is literally None". PendingMutation.from_
+    and .to use this output for display only; callers needing the
+    distinction must check membership directly.
+    """
     cur: Any = d
     for part in path.split("."):
         if isinstance(cur, dict) and part in cur:
