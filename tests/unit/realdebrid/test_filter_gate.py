@@ -111,6 +111,26 @@ def test_matched_keywords_returns_all_substring_hits() -> None:
     assert set(matched) == {"WEB-DL", "AMZN"}
 
 
+def test_record_strike_and_persist_writes_state_on_promotion(tmp_path: Path) -> None:
+    """CF10 wrapper: a fresh strike on a novel token both records AND persists."""
+    state_path = tmp_path / "state.json"
+    learner = FilterGateLearner(state_path=state_path)
+    promoted = learner.record_strike_and_persist("x.BUNDLEKW.mkv", "infringing_file")
+    assert promoted == ["BUNDLEKW"]
+    assert state_path.exists()
+    data = json.loads(state_path.read_text())
+    assert "BUNDLEKW" in data["learned_keywords"]
+
+
+def test_record_strike_and_persist_skips_save_when_no_promotion(tmp_path: Path) -> None:
+    """CF10 wrapper: non-infringing codes return [] and skip the disk write entirely."""
+    state_path = tmp_path / "state.json"
+    learner = FilterGateLearner(state_path=state_path)
+    promoted = learner.record_strike_and_persist("x.NOVELKW.mkv", "rate_limit")
+    assert promoted == []
+    assert not state_path.exists()  # no I/O when nothing was promoted
+
+
 def test_export_state_includes_known_and_learned() -> None:
     """export_state surfaces both the static baseline and runtime-learned keywords."""
     learner = FilterGateLearner()

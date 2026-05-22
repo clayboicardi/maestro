@@ -131,6 +131,26 @@ class FilterGateLearner:
                 evidence.count += 1
         return promoted
 
+    def record_strike_and_persist(
+        self,
+        filename: str,
+        rd_error_code: str,
+    ) -> list[str]:
+        """Convenience: ``record_strike`` then ``save_state`` in one call.
+
+        Use this from production callers (Phase 7 composer onward) to avoid
+        silent state loss when only the strike half of the pair is wired
+        up. ``save_state`` is a no-op when ``state_path`` is None, so this
+        is safe for both production and test wiring.
+
+        Returns the same value as ``record_strike`` -- the list of newly
+        promoted keywords -- so callers can still log the diagnostics.
+        """
+        promoted = self.record_strike(filename, rd_error_code)
+        if promoted:
+            self.save_state()
+        return promoted
+
     def save_state(self) -> None:
         """Persist learned keywords to ``state_path`` via atomic replace.
 
