@@ -85,12 +85,9 @@ async def test_validation_error_translates_to_invalid_params(
     class _Sample(BaseModel):
         required_field: int
 
-    try:
+    with pytest.raises(ValidationError) as ve_info:
         _Sample.model_validate({})  # missing required field -> ValidationError
-    except ValidationError as ve:
-        validation_error: ValidationError = ve
-    else:  # pragma: no cover - defensive; model_validate must raise above
-        pytest.fail("ValidationError was not raised by model_validate")
+    validation_error = ve_info.value
 
     middleware = MaestroErrorMiddleware()
     call_next = AsyncMock(side_effect=validation_error)
