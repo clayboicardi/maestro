@@ -58,6 +58,7 @@ def create_server() -> FastMCP:
         stremio_active=True,
         compose_active=True,
         compose_budget_s=settings.compose_budget_s,
+        diagnose_active=True,
     )
 
     mcp = FastMCP(name="maestro")
