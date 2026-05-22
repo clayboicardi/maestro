@@ -2,7 +2,7 @@
 
 > MCP server giving AI agents programmatic control over Stremio + Real-Debrid stacks.
 
-**Status:** Pre-release (v0.1.0). 9 of 10 phases locked. See [docs/specs/2026-05-21-maestro-design.md](docs/specs/2026-05-21-maestro-design.md) for the design spec.
+**Status:** v0.1.0 — release-ready. All 9 implementation phases locked. See [docs/specs/2026-05-21-maestro-design.md](docs/specs/2026-05-21-maestro-design.md) for the design spec.
 
 ## What it does
 
@@ -21,13 +21,65 @@ Maestro is a local Python MCP server that lets an AI agent (Claude Code, Cursor,
 | 6 | Stremio addon protocol domain (generic client + 6 MCP tools) | Locked 2026-05-22 |
 | 7 | `find_best_stream` composer (the killer feature) | Locked 2026-05-22 |
 | 8 | Diagnostics (3 health-probe tools) | Locked 2026-05-22 |
-| 9 | Release readiness | Next |
+| 9 | Release readiness (smoke workflow + refresh script + CF7) | Locked 2026-05-22 |
 
-Tool surface: 43 MCP tools (21 AIOStreams + 5 Torrentio + 7 Real-Debrid + 6 Stremio + 1 `find_best_stream` + 3 Diagnose). Test suite: 180 passing. Coverage: ~92%.
+Tool surface: 43 MCP tools (21 AIOStreams + 5 Torrentio + 7 Real-Debrid + 6 Stremio + 1 `find_best_stream` + 3 Diagnose). Test suite: 181 unit + integration tests passing + 1 opt-in smoke test. Coverage: ~92%.
 
 ## Install
 
-Coming in v1.0.0. See [docs/plans/2026-05-21-maestro-v1-implementation.md](docs/plans/2026-05-21-maestro-v1-implementation.md) for build progress.
+Local install via uv:
+
+```bash
+git clone https://github.com/clayboicardi/maestro
+cd maestro
+uv tool install .
+maestro-mcp --help
+```
+
+PyPI publish is pending the v0.1.0 git tag.
+
+## Configure
+
+Maestro reads its configuration from environment variables. Set them in your MCP client's config file.
+
+### Claude Code CLI (`~/.claude/mcp/maestro.json`)
+
+```json
+{
+  "mcpServers": {
+    "maestro": {
+      "command": "maestro-mcp",
+      "env": {
+        "MAESTRO_RD_TOKEN": "your-real-debrid-api-token",
+        "MAESTRO_AIOSTREAMS_BASE_URL": "https://aiostreams.elfhosted.com",
+        "MAESTRO_AIOSTREAMS_UUID": "your-uuid",
+        "MAESTRO_AIOSTREAMS_PASSWORD": "your-password"
+      }
+    }
+  }
+}
+```
+
+Claude Desktop's `claude_desktop_config.json` uses the same shape.
+
+## Development
+
+```bash
+uv sync
+uv run pytest                              # 181 unit + integration + schema_fidelity
+uv run ruff check && uv run basedpyright   # lint + type check
+```
+
+Live-upstream smoke tests are opt-in:
+
+```bash
+MAESTRO_SMOKE=1 \
+MAESTRO_RD_TOKEN=... \
+MAESTRO_AIOSTREAMS_BASE_URL=... \
+MAESTRO_AIOSTREAMS_UUID=... \
+MAESTRO_AIOSTREAMS_PASSWORD=... \
+  uv run pytest tests/smoke -v -m smoke
+```
 
 ## License
 
