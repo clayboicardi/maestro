@@ -37,6 +37,26 @@ async def test_fetch_template_pulls_json_from_url() -> None:
     assert result == payload
 
 
+@respx.mock
+@pytest.mark.asyncio
+async def test_fetch_template_raises_on_non_2xx() -> None:
+    """Non-2xx upstream raises httpx.HTTPStatusError via raise_for_status."""
+    respx.get("https://example.com/missing.json").mock(return_value=httpx.Response(404))
+    with pytest.raises(httpx.HTTPStatusError):
+        await fetch_template("https://example.com/missing.json")
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_fetch_template_rejects_non_dict_response() -> None:
+    """A JSON array response (not an object) raises ValueError."""
+    respx.get("https://example.com/array.json").mock(
+        return_value=httpx.Response(200, json=["not", "a", "dict"])
+    )
+    with pytest.raises(ValueError, match="Expected JSON object"):
+        await fetch_template("https://example.com/array.json")
+
+
 def test_merge_template_overlays_template_keys_on_config() -> None:
     base = {
         "filters": {"preferred_languages": [], "other": "keep"},

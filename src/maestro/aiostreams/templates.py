@@ -43,6 +43,11 @@ async def fetch_template(source_url: str, *, timeout_s: float = 10.0) -> dict[st
         response = await client.get(source_url, follow_redirects=True)
         response.raise_for_status()
         result: dict[str, Any] = response.json()
+        if not isinstance(result, dict):
+            raise ValueError(
+                f"Expected JSON object from template URL {source_url!r}, "
+                f"got {type(result).__name__}"
+            )
         return result
 
 
@@ -52,13 +57,18 @@ def merge_template_into_config(
     *,
     mode: Mode,
 ) -> dict[str, Any]:
-    """Overlay template keys onto a base config.
+    """Overlay template keys onto a base config (one-level deep merge).
 
-    Mode is recorded but currently a passthrough — future versions may apply
-    mode-specific filtering. For each top-level key in ``template``: if both
-    base and template values are dicts, the template's keys are shallow-merged
-    into the base dict (template wins on conflict, base keys not in template
-    are preserved). Otherwise the template's value REPLACES the base value.
+    For each top-level key in template:
+      - If both base[key] and template[key] are dicts: shallow-merge with
+        template winning on key conflicts. Keys present in base[key] but
+        not template[key] are preserved.
+      - Otherwise (including template[key] is None or a list): replace
+        base[key] wholesale. Setting a key to None intentionally erases
+        the base entry.
+
+    Mode is recorded in `_meta.applied_mode` for downstream audit; it
+    doesn't currently drive any filtering.
     """
     merged = deepcopy(base)
     for key, value in template.items():
