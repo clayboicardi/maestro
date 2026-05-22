@@ -109,6 +109,15 @@ addopts = [
     # and integration/torrentio/test_tool_registration.py) without forcing __init__.py into the
     # integration tree. `importlib` is pytest's recommended mode for projects with multiple test
     # subpackages that share file basenames.
+    #
+    # Alternatives considered: rename per-domain test files (test_aiostreams_registration.py,
+    # test_torrentio_registration.py). Rejected because each future domain (Phase 5+) would
+    # force the same rename -- importlib mode scales better.
+    #
+    # DO NOT add __init__.py files to tests/integration/* to "fix" basename collisions --
+    # combining unit/aiostreams/__init__.py with integration/aiostreams/__init__.py creates
+    # duplicate-package errors that break the existing 12 aiostreams unit tests. Stick with
+    # importlib mode.
     "--import-mode=importlib",
 ]
 

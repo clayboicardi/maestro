@@ -15,7 +15,7 @@ from fastmcp import FastMCP
 from maestro.aiostreams import register_tools as register_aiostreams
 from maestro.config import MaestroSettings
 from maestro.logging import configure_logging
-from maestro.torrentio.tools import register_tools as register_torrentio
+from maestro.torrentio import register_tools as register_torrentio
 
 
 def _strip_userinfo(url: str) -> str:
