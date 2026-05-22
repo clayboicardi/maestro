@@ -1,5 +1,7 @@
 """Error taxonomy tests."""
 
+import pytest
+
 from maestro.errors import (
     AddonMalformed,
     AddonTimeout,
@@ -8,6 +10,7 @@ from maestro.errors import (
     FilterGateStrike,
     InstanceError,
     MaestroError,
+    MaestroException,
     NoStreamsAvailable,
     RateLimitError,
     SchemaError,
@@ -81,3 +84,14 @@ def test_all_subclasses_set_their_own_code() -> None:
     assert NoStreamsAvailable(domain="compose").code == "no_streams_available"
     assert TitleUnresolved(domain="compose").code == "title_unresolved"
     assert CompositionFailure(attempts=[]).code == "composition_failure"
+
+
+def test_maestro_exception_wraps_error_payload() -> None:
+    """MaestroException carries a MaestroError subclass for boundary unwrap."""
+    err = AuthError(domain="aiostreams", suggestion="check creds")
+    with pytest.raises(MaestroException) as exc_info:
+        raise MaestroException(err)
+
+    assert isinstance(exc_info.value.error, AuthError)
+    assert exc_info.value.error.code == "auth_error"
+    assert str(exc_info.value) == "Authentication failed"  # Exception.__str__ from message

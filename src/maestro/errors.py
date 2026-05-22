@@ -1,8 +1,13 @@
 """Error taxonomy for Maestro.
 
-All tool errors are structured Pydantic models. Tools never raise to Claude;
-they return either OK[T] or these Error[E] variants. Claude needs structured
-info to decide next steps — stack traces are useless.
+All tool errors are structured Pydantic models (the *Error subclasses).
+Tools return these in OK/Err envelopes — Claude needs structured info
+to decide next steps; stack traces are useless to it.
+
+Internal helpers (clients, validators) raise MaestroException carrying
+a MaestroError payload. The MCP tool boundary catches and converts
+back to a structured response, so the "no raise to Claude" rule still
+holds end-to-end.
 """
 
 from __future__ import annotations
@@ -94,3 +99,26 @@ class CompositionFailure(MaestroError):
     code: str = "composition_failure"
     domain: str = "compose"
     attempts: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class MaestroException(Exception):
+    """Control-flow wrapper carrying a structured MaestroError payload.
+
+    Internal helpers (HTTP clients, validators) raise this to surface
+    structured errors up to the MCP tool boundary, where the boundary
+    catches it and returns `e.error.model_dump()` to Claude. The MCP
+    boundary never sees a Python traceback — only the structured payload.
+
+    Pattern:
+        raise MaestroException(AuthError(domain="aiostreams", suggestion="..."))
+
+    At the boundary:
+        try:
+            return await toolset.get_config()
+        except MaestroException as e:
+            return e.error.model_dump()
+    """
+
+    def __init__(self, error: MaestroError) -> None:
+        self.error = error
+        super().__init__(error.message)

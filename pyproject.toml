@@ -68,8 +68,10 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "tests/**/*.py" = ["PLR2004", "S101"]
 "src/maestro/aiostreams/schemas_generated.py" = ["ALL"]
-# Error taxonomy: subclasses are Pydantic BaseModels, never raised. N818's
-# "must end with Error" rule is for Exception subclasses and does not apply.
+# Error taxonomy: subclasses are Pydantic BaseModel data payloads
+# (raised via MaestroException wrapper). Several names — AddonTimeout,
+# FilterGateStrike, NoStreamsAvailable, etc. — don't end in "Error"
+# because they describe the condition, not an exception class.
 "src/maestro/errors.py" = ["N818"]
 # ToolAnnotations fields are mandated camelCase by the MCP wire format
 # (readOnlyHint, destructiveHint, idempotentHint, openWorldHint) -- they
