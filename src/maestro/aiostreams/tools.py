@@ -1,0 +1,98 @@
+"""AIOStreams MCP tool definitions (21 tools)."""
+
+from __future__ import annotations
+
+from collections.abc import Awaitable, Callable
+from copy import deepcopy
+from typing import Any
+
+import structlog
+
+from maestro.aiostreams.modify import ConfigStager, PendingMutation
+
+log = structlog.get_logger("maestro.aiostreams.tools")
+
+REDACTED = "***REDACTED***"
+
+
+def _redact_secrets(config: dict[str, Any]) -> dict[str, Any]:
+    out = deepcopy(config)
+    for service in out.get("services", []):
+        if "credential" in service:
+            service["credential"] = REDACTED
+    return out
+
+
+class AIOStreamsToolset:
+    """Holds the stager + exposes one method per MCP tool.
+
+    The server module wires each method to a FastMCP @tool registration
+    with the right annotations.
+    """
+
+    def __init__(
+        self,
+        *,
+        get_config: Callable[[], Awaitable[dict[str, Any]]],
+        put_config: Callable[[dict[str, Any]], Awaitable[dict[str, Any]]],
+    ) -> None:
+        self._stager: ConfigStager = ConfigStager(get_config=get_config, put_config=put_config)
+        self._get_config = get_config
+
+    async def get_config(self, *, include_secrets: bool = False) -> dict[str, Any]:
+        """Fetch the entire AIOStreams config. Secrets redacted unless explicit."""
+        cfg = await self._get_config()
+        if not include_secrets:
+            cfg = _redact_secrets(cfg)
+            log.info("aiostreams_get_config_redacted")
+        else:
+            log.warning("aiostreams_get_config_with_secrets")
+        return cfg
+
+    async def get_services(self) -> list[dict[str, Any]]:
+        """List debrid services + priority order (credentials redacted)."""
+        cfg = await self._get_config()
+        return _redact_secrets(cfg).get("services", [])
+
+    async def get_addons(self) -> list[dict[str, Any]]:
+        """List aggregated addons with enabled state + URLs."""
+        cfg = await self._get_config()
+        return cfg.get("addons", [])
+
+    async def get_filters(self) -> dict[str, Any]:
+        """Return current filter settings (language, quality, resolution, etc)."""
+        cfg = await self._get_config()
+        return cfg.get("filters", {})
+
+    async def get_sort_order(self) -> list[dict[str, Any]]:
+        """Return current sort hierarchy."""
+        cfg = await self._get_config()
+        return cfg.get("sortCriteria", [])
+
+    async def get_active_template(self) -> str:
+        """Return active template name, or 'Custom' if hand-edited."""
+        cfg = await self._get_config()
+        return cfg.get("presets", {}).get("active", "Custom")
+
+    async def get_statistics(self) -> dict[str, Any]:
+        """Return Show Statistics & Errors block for dud-rate debugging."""
+        cfg = await self._get_config()
+        return cfg.get("statistics", {})
+
+    async def get_template_list(self) -> list[dict[str, Any]]:
+        """Return available templates (Tamtaro variants + community).
+
+        Phase 3 stub - implementation in Task 3.4 (templates.py).
+        """
+        return []
+
+    def _stage(
+        self, transform: Callable[[dict[str, Any]], dict[str, Any]], *, field: str
+    ) -> Awaitable[PendingMutation]:
+        """Internal helper: forward a transform to the stager.
+
+        Reserved for Tasks 3.5-3.8 (write tools). Keeps PendingMutation
+        referenced so ruff F401 doesn't fire while reads are the only
+        public surface.
+        """
+        return self._stager.modify(transform, field=field)
