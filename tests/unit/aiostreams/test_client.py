@@ -4,7 +4,7 @@ import httpx
 import pytest
 import respx
 
-from maestro.aiostreams.client import AIOStreamsClient
+from maestro.aiostreams.client import AIOStreamsClient, _is_transient
 from maestro.errors import AuthError, InstanceError, MaestroException, UpstreamError
 
 
@@ -95,3 +95,20 @@ async def test_put_config_round_trip(client: AIOStreamsClient) -> None:
 
     result = await client.put_config(body)
     assert result == {"ok": True}
+
+
+def test_is_transient_honors_payload_is_transient_field() -> None:
+    """Predicate must consult UpstreamError.is_transient, not just the type.
+
+    Mirrors RD client's predicate semantics (commit 518e0df) so future
+    4xx-non-transient raise sites won't waste retry budget on deterministic
+    failures.
+    """
+    transient = MaestroException(
+        UpstreamError(domain="aiostreams", message="5xx", is_transient=True)
+    )
+    non_transient = MaestroException(
+        UpstreamError(domain="aiostreams", message="4xx", is_transient=False)
+    )
+    assert _is_transient(transient) is True
+    assert _is_transient(non_transient) is False

@@ -26,11 +26,21 @@ log = structlog.get_logger("maestro.aiostreams.client")
 
 
 def _is_transient(exc: BaseException) -> bool:
-    """Tenacity predicate: only UpstreamError payloads are retried.
+    """Tenacity predicate: only transient UpstreamError payloads are retried.
 
-    AuthError/InstanceError are non-transient and must surface immediately.
+    AuthError/InstanceError are non-transient at this layer:
+    - AuthError: never recovers without operator intervention
+    - InstanceError: 404 on the AIOStreams base URL — operator config issue
+
+    UpstreamError is split by the ``is_transient`` field on the payload:
+    5xx defaults to True (worth retrying), 4xx is raised with False
+    (auth/permissions/not-found do not recover from a retry).
     """
-    return isinstance(exc, MaestroException) and isinstance(exc.error, UpstreamError)
+    return (
+        isinstance(exc, MaestroException)
+        and isinstance(exc.error, UpstreamError)
+        and exc.error.is_transient
+    )
 
 
 class AIOStreamsClient:
