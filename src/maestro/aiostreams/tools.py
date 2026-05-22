@@ -4,11 +4,16 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from copy import deepcopy
-from typing import Any
+from typing import Any, Literal
 
 import structlog
 
 from maestro.aiostreams.modify import ConfigStager, PendingMutation
+from maestro.aiostreams.templates import (
+    KNOWN_TEMPLATES,
+    fetch_template,
+    merge_template_into_config,
+)
 
 log = structlog.get_logger("maestro.aiostreams.tools")
 
@@ -197,3 +202,57 @@ class AIOStreamsToolset:
             raise ValueError(f"Addon {addon_name!r} not found")
 
         return await self._stager.modify(transform, field="addons")
+
+    async def set_filter(self, filter_type: str, value: Any) -> PendingMutation:
+        """Generic filter setter for any key under `filters.*`.
+
+        Prefer the typed setters (set_preferred_languages, set_cached_only,
+        set_resolution_floor) where they exist. Use this for less-common filters.
+        """
+        return await self._stage_filter(key=filter_type, value=value)
+
+    async def set_sort_order(self, order: list[dict[str, str]]) -> PendingMutation:
+        """Replace the sort hierarchy. Each entry is {key, direction}."""
+        return await self._stager.modify(
+            lambda cfg: {**cfg, "sortCriteria": list(order)},
+            field="sortCriteria",
+        )
+
+    async def set_misc_toggle(self, toggle: str, *, value: bool) -> PendingMutation:
+        """Toggle a flag under `misc.*` (e.g. show_statistics, digital_release_filter)."""
+        return await self._stager.modify(
+            lambda cfg: {
+                **cfg,
+                "misc": {**cfg.get("misc", {}), toggle: value},
+            },
+            field=f"misc.{toggle}",
+        )
+
+    async def apply_template(
+        self,
+        template_name: str,
+        *,
+        mode: Literal["Debrid", "P2P", "Both"] = "Debrid",
+    ) -> PendingMutation:
+        """DESTRUCTIVE: replaces config with the named template overlay.
+
+        Looks up template_name in KNOWN_TEMPLATES, fetches its JSON, merges
+        into the current config (one-level deep merge), then stamps
+        `presets.active = template_name`. The mutation is staged; save()
+        flushes via PUT.
+        """
+        match = next((t for t in KNOWN_TEMPLATES if t["name"] == template_name), None)
+        if match is None:
+            raise ValueError(
+                f"Template {template_name!r} not found in catalog. "
+                f"Known: {[t['name'] for t in KNOWN_TEMPLATES]}"
+            )
+
+        template_payload = await fetch_template(match["source_url"])
+
+        def transform(cfg: dict[str, Any]) -> dict[str, Any]:
+            merged = merge_template_into_config(cfg, template_payload, mode=mode)
+            merged.setdefault("presets", {})["active"] = template_name
+            return merged
+
+        return await self._stager.modify(transform, field="presets.active")
