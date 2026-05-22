@@ -1,7 +1,16 @@
-"""Template fetching + merging for Tamtaro/Vidhin community configs.
+"""Template fetching + merging for AIOStreams community configs.
 
-Templates are JSON files hosted on GitHub by the community
-(Tam-Taro/SEL-Filtering-and-Sorting, Vidhin05/Releases-Regex).
+A "template" is a pre-built AIOStreams UserData JSON blob curated by the
+community (currently Tam-Taro/SEL-Filtering-and-Sorting, which
+auto-syncs Vidhin05/Releases-Regex into its regex pack). Templates
+encode opinionated SEL setups: filter defaults, sort order, addon
+selection, and regex packs tuned for Debrid/P2P/Both workflows.
+
+Apply path: :func:`fetch_template` pulls the JSON from its GitHub raw
+URL; :func:`merge_template_into_config` overlays it onto the user's
+current config; the result is staged through
+:class:`maestro.aiostreams.modify.ConfigStager` and flushed with a
+single PUT.
 """
 
 from __future__ import annotations
@@ -14,6 +23,13 @@ import structlog
 
 log = structlog.get_logger("maestro.aiostreams.templates")
 
+# Apply-time mode hint for the SEL setup. Today this is a documentation
+# parameter on :func:`merge_template_into_config` -- it does not alter the
+# merge result. Reserved for future mode-driven filtering when the
+# template format gains explicit per-mode sections.
+# - "Debrid": assume RD/AD/Premiumize available; bias toward cached streams.
+# - "P2P"   : assume no debrid backend; bias toward seeded P2P streams.
+# - "Both"  : permissive default; surface both buckets.
 Mode = Literal["Debrid", "P2P", "Both"]
 
 KNOWN_TEMPLATES: list[dict[str, str]] = [
@@ -37,7 +53,20 @@ def list_templates() -> list[dict[str, str]]:
 
 
 async def fetch_template(source_url: str, *, timeout_s: float = 10.0) -> dict[str, Any]:
-    """Fetch a template JSON from its source URL."""
+    """Fetch a template JSON from its source URL.
+
+    Issues a single GET with redirect following enabled. Raises:
+
+    - ``httpx.HTTPStatusError`` on non-2xx response,
+    - ``httpx.RequestError`` on network failure or timeout,
+    - ``ValueError`` if the response parses as JSON but the top-level
+      value is not an object (template contract requires a dict).
+
+    No retry or backoff at this layer -- templates are pulled at apply
+    time, and the user-visible error message benefits from being
+    immediate. Default timeout is 10s; callers needing longer
+    propagation should pass ``timeout_s`` explicitly.
+    """
     log.info("aiostreams_fetch_template", url=source_url)
     async with httpx.AsyncClient(timeout=timeout_s) as client:
         response = await client.get(source_url, follow_redirects=True)

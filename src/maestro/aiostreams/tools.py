@@ -39,6 +39,18 @@ _RESOLUTION_LADDER: list[str] = [
 
 
 def _redact_secrets(config: dict[str, Any]) -> dict[str, Any]:
+    """Return a deepcopy of ``config`` with debrid credentials redacted.
+
+    AIOStreams stores per-service credentials inline in the user config
+    (``services[].credential`` — a bearer token or API key for the
+    debrid backend). Anything that surfaces the config through an MCP
+    tool MUST pass through this redactor unless the caller has
+    explicitly opted into ``include_secrets``.
+
+    The deepcopy is load-bearing: returning a shallow copy would alias
+    the credential strings into the redacted output, defeating the
+    point.
+    """
     out = deepcopy(config)
     for service in out.get("services", []):
         if "credential" in service:

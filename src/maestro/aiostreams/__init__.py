@@ -1,4 +1,18 @@
-"""AIOStreams domain -- config CRUD + Tamtaro template support."""
+"""AIOStreams domain -- config CRUD + community template support.
+
+This package owns the 21 MCP tools that read and write a user's
+AIOStreams config (``/api/v1/user/<uuid>``). Layered as:
+
+- :mod:`.client` -- async httpx wrapper around GET / PUT, with retry
+  + tenacity transient-error classification.
+- :mod:`.modify` -- :class:`.modify.ConfigStager` stages mutations in
+  memory and flushes a single PUT on save (PUT is full-replace,
+  not PATCH).
+- :mod:`.templates` -- fetch + merge community-curated SEL templates.
+- :mod:`.tools` -- :class:`.tools.AIOStreamsToolset` exposes 9 read +
+  12 destructive operations; secrets are redacted at the read boundary.
+- :func:`register_tools` -- wires the toolset onto a FastMCP app.
+"""
 
 from __future__ import annotations
 
@@ -11,7 +25,28 @@ from maestro.config import MaestroSettings
 
 
 def register_tools(mcp: FastMCP, settings: MaestroSettings) -> None:
-    """Register all 21 AIOStreams tools on the FastMCP app."""
+    """Register all 21 AIOStreams tools on the FastMCP app.
+
+    Constructs a single :class:`AIOStreamsClient` (and thus a single
+    :class:`.modify.ConfigStager` via the toolset) per server lifetime,
+    so all tool invocations share one in-memory staging session. The
+    client's lazy ``httpx.AsyncClient`` is reused across all reads and
+    writes.
+
+    Annotation strategy: 9 tools are marked ``read_only`` (idempotent,
+    no side effects beyond logging) and 12 are marked ``destructive``
+    (stage or flush a write). The annotation set follows MCP's
+    camelCase convention (``readOnlyHint`` / ``destructiveHint`` /
+    ``idempotentHint`` / ``openWorldHint``) -- note the per-file lint
+    ignore in ``pyproject.toml`` for the N815 violation this would
+    otherwise raise.
+
+    Secret handling: the configured ``aiostreams_password`` is unwrapped
+    via ``.get_secret_value()`` exactly here, then passed to the client
+    as a plain string for the lifetime of the process. Pydantic v2's
+    ``SecretStr.__eq__`` does not compare against plain strings; the
+    project tracks this as one of the hard invariants in CLAUDE.md.
+    """
     client = AIOStreamsClient(
         base_url=str(settings.aiostreams_base_url),
         uuid=settings.aiostreams_uuid,

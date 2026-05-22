@@ -44,7 +44,24 @@ def _is_transient(exc: BaseException) -> bool:
 
 
 class AIOStreamsClient:
-    """Async client for one AIOStreams instance + one user account."""
+    """Async client for one AIOStreams instance + one user account.
+
+    Lifecycle: the underlying ``httpx.AsyncClient`` is lazy-initialized on
+    first request and reused across calls within the same instance. Call
+    :meth:`aclose` to release the connection pool — note that in stdio-MCP
+    deployments this is not currently invoked at shutdown (process exit
+    reclaims the sockets); see :meth:`aclose` for the rationale.
+
+    Auth model is HTTP Basic with ``<uuid>:<password>``. The same UUID
+    appears both in the URL path (``/api/v1/user/<uuid>``) and as the basic
+    auth username — AIOStreams treats the URL path as the lookup key and
+    the basic auth header as the credential check.
+
+    Writes are full-replace PUT (not PATCH). Read-modify-write is the
+    caller's responsibility; see
+    :class:`maestro.aiostreams.modify.ConfigStager` for the in-memory
+    staging pattern that bridges per-tool edits onto a single PUT flush.
+    """
 
     def __init__(
         self,
@@ -64,6 +81,12 @@ class AIOStreamsClient:
         self._client: httpx.AsyncClient | None = None
 
     async def _get_client(self) -> httpx.AsyncClient:
+        """Return the lazy-initialized async HTTP client.
+
+        Constructs an ``httpx.AsyncClient`` on first call (binding auth +
+        timeout) and reuses it on subsequent calls. Resetting the pool
+        requires :meth:`aclose`.
+        """
         if self._client is None:
             self._client = httpx.AsyncClient(
                 auth=self._auth,
@@ -72,6 +95,17 @@ class AIOStreamsClient:
         return self._client
 
     async def aclose(self) -> None:
+        """Release the underlying connection pool.
+
+        Idempotent: safe to call multiple times. After close, the next
+        request lazily reinitializes the client.
+
+        Known trade-off (CF11): the stdio-MCP server does not call this
+        on shutdown -- process exit reclaims sockets, and FastMCP's
+        lifespan hooks do not currently expose a clean teardown signal
+        for per-domain clients. Revisit if maestro migrates to a
+        long-running transport (HTTP/SSE) where leaked pools matter.
+        """
         if self._client is not None:
             await self._client.aclose()
             self._client = None
@@ -113,7 +147,20 @@ class AIOStreamsClient:
         return response
 
     async def _request(self, method: str, json: dict[str, Any] | None = None) -> httpx.Response:
-        """Retry-wrapped request honoring per-instance retry_attempts."""
+        """Retry-wrapped request honoring per-instance ``retry_attempts``.
+
+        Wraps :meth:`_do_request` in tenacity's ``AsyncRetrying`` with the
+        :func:`_is_transient` predicate (only ``UpstreamError`` payloads
+        marked transient are retried). Backoff is exponential with a 1-4
+        second window.
+
+        ``response`` is typed ``Response | None`` so the type checker
+        accepts the initial state; on the success path the loop body
+        assigns it before exit. ``reraise=True`` ensures retry exhaustion
+        propagates the underlying exception rather than tenacity's
+        ``RetryError`` wrapper, so the assert never fires in practice --
+        either the loop assigns ``response`` or it raises.
+        """
         response: httpx.Response | None = None
         async for attempt in AsyncRetrying(
             retry=retry_if_exception(_is_transient),
@@ -128,13 +175,30 @@ class AIOStreamsClient:
         return response
 
     async def get_config(self) -> dict[str, Any]:
-        """Fetch the current full UserData blob."""
+        """Fetch the current full UserData blob.
+
+        Returns the raw JSON body of ``GET /api/v1/user/<uuid>`` -- shape
+        matches the auto-generated Pydantic model derived from the
+        upstream AIOStreams Zod schema (see
+        :mod:`maestro.aiostreams.schemas_generated`). Includes sensitive
+        fields (debrid service credentials); callers serving the result
+        through MCP tools should redact via
+        :func:`maestro.aiostreams.tools._redact_secrets` unless the
+        caller has explicitly opted into ``include_secrets``.
+        """
         log.info("aiostreams_get_config_request")
         response = await self._request("GET")
         return response.json()
 
     async def put_config(self, body: dict[str, Any]) -> dict[str, Any]:
-        """Full-replace PUT of the user config."""
+        """Full-replace PUT of the user config.
+
+        ``body`` must be the entire UserData blob -- AIOStreams does not
+        merge partial bodies. The response is the server-side state
+        after the write (typically the same blob plus a freshly issued
+        ``install_url``). On 4xx/5xx the wrapper translates to
+        :class:`maestro.errors.MaestroException`; see :meth:`_do_request`.
+        """
         log.info("aiostreams_put_config_request", body_keys=list(body.keys()))
         response = await self._request("PUT", json=body)
         return response.json()
