@@ -67,6 +67,7 @@ class AIOStreamsToolset:
     ) -> None:
         self._stager: ConfigStager = ConfigStager(get_config=get_config, put_config=put_config)
         self._get_config = get_config
+        self._last_install_url: str = ""
 
     async def get_config(self, *, include_secrets: bool = False) -> dict[str, Any]:
         """Fetch the entire AIOStreams config. Secrets redacted unless explicit."""
@@ -263,3 +264,17 @@ class AIOStreamsToolset:
             return merged
 
         return await self._stager.modify(transform, field="presets.active")
+
+    async def save(self) -> dict[str, Any]:
+        """Commit all staged writes. Returns the new install URL on success."""
+        result = await self._stager.save()
+        if "install_url" in result:
+            self._last_install_url = result["install_url"]
+        return result
+
+    async def get_install_url(self) -> str:
+        """Return the Stremio install URL produced by the last save().
+
+        Empty string if no save has happened in this session.
+        """
+        return self._last_install_url
