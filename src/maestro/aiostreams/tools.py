@@ -13,6 +13,7 @@ from maestro.aiostreams.templates import (
     KNOWN_TEMPLATES,
     Mode,
     fetch_template,
+    list_templates,
     merge_template_into_config,
 )
 
@@ -109,12 +110,9 @@ class AIOStreamsToolset:
         cfg = await self._get_config()
         return cfg.get("statistics", {})
 
-    async def get_template_list(self) -> list[dict[str, Any]]:
-        """Return available templates (Tamtaro variants + community).
-
-        Phase 3 stub - implementation in Task 3.4 (templates.py).
-        """
-        return []
+    async def get_template_list(self) -> list[dict[str, str]]:
+        """Return available templates (Tamtaro variants + community)."""
+        return list_templates()
 
     async def _stage_filter(self, *, key: str, value: Any) -> PendingMutation:
         """Internal helper: stage a write under `filters.<key>`.
@@ -164,7 +162,16 @@ class AIOStreamsToolset:
         *,
         position: int | None = None,
     ) -> PendingMutation:
-        """Add an aggregated addon by manifest URL. Position is 0-indexed insert; None appends."""
+        """Add an aggregated addon by manifest URL.
+
+        Position is 0-indexed insert; None appends.
+
+        The new addon's `name` field is populated by AIOStreams server-side after
+        save() -- the staged entry has no name. Consequence: calling remove_addon
+        or toggle_addon for a just-added addon in the SAME session (before save)
+        will raise ValueError("not found"), because matching is by name. Call
+        save() first, then refetch via get_config() to learn the assigned name.
+        """
 
         def transform(cfg: dict[str, Any]) -> dict[str, Any]:
             new_entry = {"manifestUrl": addon_url, "enabled": True}

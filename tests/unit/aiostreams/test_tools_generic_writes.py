@@ -80,6 +80,39 @@ async def test_apply_template_unknown_name_raises(toolset: AIOStreamsToolset) ->
 
 @respx.mock
 @pytest.mark.asyncio
+async def test_apply_template_then_typed_write_stacks_cleanly(
+    toolset: AIOStreamsToolset,
+) -> None:
+    """A typed write after apply_template preserves the template's overlay."""
+    template_url = (
+        "https://raw.githubusercontent.com/Tam-Taro/SEL-Filtering-and-Sorting/"
+        "main/templates/complete-sel-setup-v2.6.1.json"
+    )
+    template_body = {
+        "filters": {"preferred_languages": ["Spanish"], "custom_template_field": "kept"},
+    }
+    respx.get(template_url).mock(return_value=httpx.Response(200, json=template_body))
+
+    # Step 1: apply template (sets preferred_languages=Spanish, adds custom field)
+    await toolset.apply_template(
+        template_name="Tamtaro Complete SEL Setup v2.6.1",
+        mode="Debrid",
+    )
+
+    # Step 2: typed write that overrides preferred_languages back to English
+    mutation = await toolset.set_preferred_languages(["English"])
+    assert mutation.to == ["English"]
+
+    # Both mutations are staged
+    pending = toolset._stager.pending_mutations()
+    assert len(pending) == 2
+    assert pending[0].field == "presets.active"
+    assert pending[1].field == "filters.preferred_languages"
+    assert pending[1].to == ["English"]
+
+
+@respx.mock
+@pytest.mark.asyncio
 async def test_apply_template_handles_missing_presets_in_base() -> None:
     """setdefault on presets path works when base has no presets key."""
     template_url = (

@@ -93,3 +93,12 @@ async def test_get_active_template(toolset: AIOStreamsToolset) -> None:
 async def test_get_statistics(toolset: AIOStreamsToolset) -> None:
     stats = await toolset.get_statistics()
     assert stats["enabled"] is True
+
+
+@pytest.mark.asyncio
+async def test_get_template_list_returns_known_templates(toolset: AIOStreamsToolset) -> None:
+    """get_template_list returns the curated KNOWN_TEMPLATES catalog."""
+    templates = await toolset.get_template_list()
+    assert len(templates) >= 1
+    names = [t["name"] for t in templates]
+    assert "Tamtaro Complete SEL Setup v2.6.1" in names

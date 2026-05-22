@@ -68,3 +68,18 @@ async def test_toggle_addon_unknown_raises(toolset: AIOStreamsToolset) -> None:
     """Symmetry with remove: toggle on a missing addon also raises ValueError."""
     with pytest.raises(ValueError, match="not found"):
         await toolset.toggle_addon("NonexistentAddon", enabled=False)
+
+
+@pytest.mark.asyncio
+async def test_add_addon_then_remove_same_session_raises_until_saved(
+    toolset: AIOStreamsToolset,
+) -> None:
+    """Documents the name-after-save contract: same-session add+remove fails by name."""
+    await toolset.add_addon(addon_url="https://new.example/manifest.json")
+
+    # The newly-staged addon has no name, so name-based remove can't find it
+    # by ANY name (including the URL, the empty string, etc.)
+    with pytest.raises(ValueError, match="not found"):
+        await toolset.remove_addon("https://new.example/manifest.json")
+    with pytest.raises(ValueError, match="not found"):
+        await toolset.remove_addon("")
