@@ -53,7 +53,7 @@ class SchemaError(MaestroError):
     message: str = "Schema mismatch — upstream may have changed"
     # `suggestion` is intentionally None at the base level: SchemaError is generic
     # across domains, so each raise site passes a domain-appropriate fix hint
-    # (e.g., AIOStreams raises suggest running scripts/regen_aiostreams_schemas.sh).
+    # (e.g., AIOStreams raise sites suggest running scripts/regen_aiostreams_schemas.sh).
     suggestion: str | None = None
     is_transient: bool = False
 

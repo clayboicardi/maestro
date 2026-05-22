@@ -11,8 +11,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `REVIEW-CAMPAIGN-2026.md` at the repo root — public-facing roadmap for the systematic code-review campaign on this repository (Gemini Code Assist auto-review plus `/octo:review` triangulation plus independent project-scoped review session, eight subsystem-scoped review PRs targeting `master`)
 
-## [Unreleased]
-
 ### Changed
 
 - `diagnose_stack_health`, `diagnose_rd_health`, `diagnose_dud_rate` now declare `idempotentHint=false`. They sample changing upstream state (RD account, addon reachability, filter-gate strikes), so repeated invocations are not equivalent and MCP clients should not memoize their results.

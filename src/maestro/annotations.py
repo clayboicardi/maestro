@@ -48,10 +48,24 @@ class ToolAnnotations(BaseModel):
 
 
 def read_only(*, title: str, idempotent: bool = True) -> ToolAnnotations:
+    """Tools that observe state but never modify it (GET-shaped operations).
+
+    The ``idempotent`` keyword maps to the MCP wire-format ``idempotentHint``
+    field (camelCase preserved by ``ToolAnnotations``). Defaults to ``True``;
+    pass ``idempotent=False`` for read tools whose repeated calls sample
+    changing state (e.g., health probes).
+    """
     return ToolAnnotations(title=title, readOnlyHint=True, idempotentHint=idempotent)
 
 
 def destructive(*, title: str) -> ToolAnnotations:
+    """Tools that mutate external state irreversibly (DELETE-shaped + replace-shaped).
+
+    Sets ``destructiveHint=True`` on the wire. Compliant MCP clients
+    (including Claude Desktop) surface the hint to gate user confirmation
+    before invocation; setting it correctly is the only safety signal the
+    server side can provide.
+    """
     return ToolAnnotations(title=title, destructiveHint=True)
 
 
