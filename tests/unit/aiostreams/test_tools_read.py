@@ -1,5 +1,6 @@
 """Read-tool tests for AIOStreams domain (with secret redaction check)."""
 
+from copy import deepcopy
 from typing import Any
 
 import pytest
@@ -35,7 +36,7 @@ def sample_config() -> dict[str, Any]:
 @pytest.fixture
 def toolset(sample_config: dict[str, Any]) -> AIOStreamsToolset:
     async def fake_get_config() -> dict[str, Any]:
-        return sample_config
+        return deepcopy(sample_config)  # avoid shared-mutable hazard
 
     async def fake_put_config(body: dict[str, Any]) -> dict[str, Any]:
         return {"ok": True}

@@ -8,7 +8,7 @@ from typing import Any
 
 import structlog
 
-from maestro.aiostreams.modify import ConfigStager, PendingMutation
+from maestro.aiostreams.modify import ConfigStager
 
 log = structlog.get_logger("maestro.aiostreams.tools")
 
@@ -28,6 +28,13 @@ class AIOStreamsToolset:
 
     The server module wires each method to a FastMCP @tool registration
     with the right annotations.
+
+    Read tools return references into the freshly-fetched config (no
+    deepcopy on passthrough fields like addons/filters/sortCriteria/
+    statistics). Callers MUST NOT mutate the returned objects. The
+    `get_config` and `get_services` paths deepcopy because they pass
+    through `_redact_secrets`. If a future client introduces a fetch
+    cache, audit each passthrough method for safety.
     """
 
     def __init__(
@@ -85,14 +92,3 @@ class AIOStreamsToolset:
         Phase 3 stub - implementation in Task 3.4 (templates.py).
         """
         return []
-
-    def _stage(
-        self, transform: Callable[[dict[str, Any]], dict[str, Any]], *, field: str
-    ) -> Awaitable[PendingMutation]:
-        """Internal helper: forward a transform to the stager.
-
-        Reserved for Tasks 3.5-3.8 (write tools). Keeps PendingMutation
-        referenced so ruff F401 doesn't fire while reads are the only
-        public surface.
-        """
-        return self._stager.modify(transform, field=field)
