@@ -51,7 +51,10 @@ class RateLimitError(MaestroError):
 class SchemaError(MaestroError):
     code: str = "schema_error"
     message: str = "Schema mismatch — upstream may have changed"
-    suggestion: str | None = "Run scripts/regen_aiostreams_schemas.sh and review the diff"
+    # `suggestion` is intentionally None at the class level: SchemaError is generic
+    # across domains, so each raise site passes a domain-appropriate fix hint
+    # (e.g., AIOStreams raise sites suggest running scripts/regen_aiostreams_schemas.sh).
+    suggestion: str | None = None
     is_transient: bool = False
 
 
@@ -86,17 +89,20 @@ class FilterGateStrike(MaestroError):
 
 class NoStreamsAvailable(MaestroError):
     code: str = "no_streams_available"
+    message: str = "No streams available for the requested title"
     domain: str = "compose"
 
 
 class TitleUnresolved(MaestroError):
     code: str = "title_unresolved"
+    message: str = "Title could not be resolved to an IMDb ID"
     domain: str = "compose"
     suggestion: str | None = "Pass imdb_id directly if you have it"
 
 
 class CompositionFailure(MaestroError):
     code: str = "composition_failure"
+    message: str = "Stream composition failed after exhausting all candidates"
     domain: str = "compose"
     attempts: list[dict[str, Any]] = Field(default_factory=list)
 

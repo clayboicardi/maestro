@@ -1,7 +1,9 @@
 """Maestro MCP server entry point.
 
-Boots a FastMCP stdio server. Tools land here via domain-module
-register_* functions in later phases.
+Boots a FastMCP stdio server with all registered domain toolsets and
+the ``MaestroErrorMiddleware`` installed at the tool boundary. Settings
+load once from environment via ``MaestroSettings``; logging routes to
+stderr per the stdio rule (stdout carries the JSON-RPC frame).
 """
 
 from __future__ import annotations
