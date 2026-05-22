@@ -18,6 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `diagnose_stack_health`, `diagnose_rd_health`, `diagnose_dud_rate` now declare `idempotentHint=false`. They sample changing upstream state (RD account, addon reachability, filter-gate strikes), so repeated invocations are not equivalent and MCP clients should not memoize their results.
 - `SchemaError.suggestion` default is now `None`. The previous default text was AIOStreams-specific ("Run scripts/regen_aiostreams_schemas.sh..."), but `SchemaError` is generic across domains. Each raise site now passes a domain-appropriate suggestion explicitly.
 
+### Fixed
+
+- `NoStreamsAvailable`, `TitleUnresolved`, and `CompositionFailure` now declare class-level `message` defaults. Previously these three composer-domain error subclasses inherited the empty default from `MaestroError`, so the MCP wire response's `message` field landed as `"CompositionFailure: "` (with trailing colon-space) when callers raised without explicitly setting `message=`. The wire payload's structured `data` was always populated; this fix makes the human-readable `message` useful for these three error types.
+
 ## [0.1.0] — 2026-05-22
 
 ### Added

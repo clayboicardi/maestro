@@ -89,17 +89,20 @@ class FilterGateStrike(MaestroError):
 
 class NoStreamsAvailable(MaestroError):
     code: str = "no_streams_available"
+    message: str = "No streams available for the requested title"
     domain: str = "compose"
 
 
 class TitleUnresolved(MaestroError):
     code: str = "title_unresolved"
+    message: str = "Title could not be resolved to an IMDb ID"
     domain: str = "compose"
     suggestion: str | None = "Pass imdb_id directly if you have it"
 
 
 class CompositionFailure(MaestroError):
     code: str = "composition_failure"
+    message: str = "Stream composition failed after exhausting all candidates"
     domain: str = "compose"
     attempts: list[dict[str, Any]] = Field(default_factory=list)
 
