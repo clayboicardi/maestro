@@ -12,7 +12,7 @@ Per review PR:
 2. Wait for the Gemini Code Assist auto-review.
 3. Run `/octo:review` (Claude + Gemini providers) for triangulation.
 4. An independent project-scoped session produces a third read against the same diff.
-5. Synthesize a three-bucket punch list: must-fix, should-consider, skip with rationale.
+5. Synthesize a three-bucket punch list: Must-fix, Should-consider, Skip-with-rationale.
 6. Implement approved fixes on a separate fix branch, one atomic commit per fix.
 7. Merge the fix PR with a merge commit; close the review PR as an audit record (review PRs never merge).
 
