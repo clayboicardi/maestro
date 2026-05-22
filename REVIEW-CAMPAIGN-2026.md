@@ -29,8 +29,8 @@ A finding qualifies as **Must-fix** when at least two of the three reviewers fla
 - **Existing audit artifacts:** none in-repo. The pre-v0.1.0 audit trail lived in working sessions; this is the first formal post-release audit.
 - **Test coverage signal:** 34 test files against 31 handwritten source files. Tests cover every domain; the breakdown is 32 unit, 7 integration (one tool-registration test per domain), 3 schema-fidelity, and 2 smoke (smoke is opt-in via `MAESTRO_SMOKE=1`). Coverage measured locally at ~92%.
 - **CI gates currently enforced:** ruff lint, ruff format check, basedpyright type check, pytest across Python 3.12, 3.13, and 3.14. A nightly smoke workflow runs the same opt-in live-upstream tests against pinned Action secrets; the first manual dispatch ran SUCCESS on 2026-05-22 in 19 seconds.
-- **CI gap surfaced by the audit:** `pyproject.toml` declares `[tool.coverage.report] fail_under = 75`, but the CI workflow runs `pytest` without `--cov`, so the threshold is declared but not enforced. The ~92% coverage figure in README and CHANGELOG is a local-run artifact, not a CI guarantee. A one-line CI fix to gate this is on the post-release follow-up tracker; review PR 8 may surface it independently.
-- **TODO/FIXME density:** one marker total, and inspection shows it's a false positive — the implementation-plan document itself asserts "no TODO patterns" in its own text. True in-code TODO debt is zero. Deferred items are tracked in the post-release follow-up document rather than as in-code markers.
+- **CI gap surfaced by the audit:** `pyproject.toml` declares `[tool.coverage.report] fail_under = 75`, but the CI workflow runs `pytest` without `--cov`, so the threshold is declared but not enforced. The ~92% coverage figure in README and CHANGELOG is a local-run artifact, not a CI guarantee. A one-line CI fix to gate this is a known follow-up; review PR 8 may surface it independently as part of the CI hardening pass.
+- **TODO/FIXME density:** one marker total, and inspection shows it's a false positive — the implementation-plan document itself asserts "no TODO patterns" in its own text. True in-code TODO debt is zero. Deferred items live outside the source tree rather than as in-code markers.
 
 ## Locked Subsystem Inventory
 
@@ -68,11 +68,11 @@ Total review PRs: 8.
 
 - **Branch:** `review-aiostreams-1`
 - **Severity threshold:** TBD per PR 1 outcome
-- **Scope:** The largest domain by both file count and tool surface: the async AIOStreams client, the 21 MCP tools that operate on it, the staged-write commit pattern that handles AIOStreams' PUT-full-replace semantics transparently, and the Tamtaro template fetch and merge logic.
+- **Scope:** The largest domain by both file count and tool surface: the async AIOStreams client, the 21 MCP tools that operate on it, the staged-write commit pattern that handles AIOStreams' PUT-full-replace semantics transparently, and the AIOStreams community template fetch and merge logic.
 - **Focus areas (priority order):**
   1. Staged-write contract: `_modify(transform_fn)` fetches the current `UserData`, applies the transform, and stages it in memory; only `aiostreams_save()` mutates remote state via PUT to `/api/v1/user`. No partial PATCH calls. Writes are not retried on error because the staging buffer is the safety net.
   2. The 21-tool surface coverage: every tool emits the correct annotations, accepts the right input shape per the generated schemas, and handles the credential-redaction default on read tools.
-  3. Template fetch and merge: Tamtaro template fetch, merge against the staged buffer, conflict semantics, and the apply-template tool's DESTRUCTIVE annotation plus confirmation gate.
+  3. Template fetch and merge: AIOStreams community template fetch, merge against the staged buffer, conflict semantics, and the apply-template tool's DESTRUCTIVE annotation plus confirmation gate.
   4. Basic-auth credential handling: `SecretStr` for `MAESTRO_AIOSTREAMS_PASSWORD`, `.get_secret_value()` discipline on the auth header construction.
 - **Files in scope:** `src/maestro/aiostreams/client.py`, `tools.py`, `modify.py`, `templates.py`, `schemas.py` (hand-overlay validators), and the nine `tests/unit/aiostreams/*` files.
 - **Non-goals:** `schemas_generated.py` (auto-generated and lint-exempt; reviewed in PR 7 as part of the schema-generation pipeline), schema-fidelity drift detection (also PR 7).
@@ -111,7 +111,7 @@ Total review PRs: 8.
 - **Focus areas (priority order):**
   1. `parse_url` round-trip correctness: given a Torrentio install URL, decode it to a config struct and re-encode; round-trip equality must hold for the full grammar.
   2. Enum freshness: the provider, quality, language, and limit enums match upstream Torrentio's `filter.js` as of the pinned reference. Drift detection on enum mismatch is acceptable; silent provider drops are not.
-  3. Known follow-ups from the post-release tracker that are in scope to verify-not-re-audit: an environment-variable override for the base URL that is currently loaded but not propagated through the encoder; a silent drop behavior on invalid `limit=` values in `parse_url`; the 24-provider error message verbosity; a dead helper function. These four have documented dispositions and this PR's review confirms those dispositions hold rather than re-deriving them.
+  3. Known follow-ups that are in scope to verify-not-re-audit (each has a documented disposition; this PR's review confirms the disposition holds rather than re-deriving it): an environment-variable override for the base URL that is currently loaded but not propagated through the encoder; a silent drop behavior on invalid `limit=` values in `parse_url`; the 24-provider error message verbosity; a dead helper function.
 - **Files in scope:** `src/maestro/torrentio/encoder.py`, `enums.py`, `tools.py`, `__init__.py`, and `tests/unit/torrentio/test_encoder.py`, `test_enums.py`, `test_tools.py`.
 - **Non-goals:** Torrentio upstream API changes (out of repo scope), composition with `find_best_stream` (which currently does not use Torrentio in v1.0; covered in PR 4).
 
@@ -147,8 +147,8 @@ Total review PRs: 8.
 - **Focus areas (priority order):**
   1. CI matrix integrity: `ci.yaml` runs ruff check, ruff format check, basedpyright, and pytest across Python 3.12, 3.13, and 3.14. The lint, format check, and type check are documented as distinct steps because `ruff check` is not the same as `ruff format --check`. Both must run on every PR.
   2. Smoke workflow secret discipline: `smoke.yaml` reads four secrets from the repository settings, never logs them, and the workflow's manual-dispatch plus nightly-cron schedule combination is intentional. Action-secret-leak surface holds.
-  3. Fixture-refresh helper hardening: the `scripts/refresh_fixtures.sh` helper currently has three known nits — environment-variable defaulting under `set -u`, write-then-rename atomicity for fixture files, and `curl --fail` to reject HTTP error responses as fixtures. These three have documented fixes pending in the post-release follow-up tracker.
-  4. Coverage threshold gating: the audit found that `pyproject.toml` declares `[tool.coverage.report] fail_under = 75` but the CI workflow runs `pytest` without `--cov`, so the threshold is not enforced. A one-line CI fix is on the post-release tracker; this PR's review may surface it independently as a consistency-with-README finding.
+  3. Fixture-refresh helper hardening: the `scripts/refresh_fixtures.sh` helper currently has three known nits — environment-variable defaulting under `set -u`, write-then-rename atomicity for fixture files, and `curl --fail` to reject HTTP error responses as fixtures. These three have documented fixes pending.
+  4. Coverage threshold gating: the audit found that `pyproject.toml` declares `[tool.coverage.report] fail_under = 75` but the CI workflow runs `pytest` without `--cov`, so the threshold is not enforced. A one-line CI fix is a known follow-up; this PR's review may surface it independently as a consistency-with-README finding.
 - **Files in scope:** `.github/workflows/ci.yaml`, `.github/workflows/smoke.yaml`, `scripts/refresh_fixtures.sh`. The sibling `scripts/regen_aiostreams_schemas.sh` is reviewed in PR 7.
 - **Non-goals:** GitHub Actions runner internals (out of scope), the smoke-test test bodies (covered as part of PR 3's RD client review where the smoke test lives).
 
@@ -165,7 +165,7 @@ Total review PRs: 8.
   ```
 
 - **CI gates currently enforced:** ruff lint, ruff format check, basedpyright type check, pytest matrix on Python 3.12, 3.13, and 3.14. Smoke workflow runs nightly at 06:00 UTC and on manual dispatch; the smoke run is opt-in via `MAESTRO_SMOKE=1` and gated on four repository secrets that are now configured.
-- **Coverage threshold:** declared at 75% in `pyproject.toml`, but the CI workflow does not currently invoke pytest with `--cov`, so the threshold is not yet enforced in CI. The README's ~92% figure is a local-run measurement. This is on the post-release tracker as a one-line CI step addition; PR 8 may surface it independently.
+- **Coverage threshold:** declared at 75% in `pyproject.toml`, but the CI workflow does not currently invoke pytest with `--cov`, so the threshold is not yet enforced in CI. The README's ~92% figure is a local-run measurement. A one-line CI step addition is a known follow-up; PR 8 may surface it independently.
 - **`CHANGELOG.md` is in `.gemini/ignore_patterns`.** Gemini will not review CHANGELOG entries directly; their accuracy surfaces through `/octo:review` and the project-scoped session.
 - **Hard invariants** that every review verifies regardless of which subsystem the PR scopes to: stdout must stay empty (no `print()`, no untyped libraries that warn to stdout), `SecretStr` fields use `.get_secret_value()` for any comparison or auth-header construction, and the schema-regeneration script and SHA file must stay in sync as a two-file pin.
 - **Release context:** `v0.1.0` was tagged and a GitHub Release published on 2026-05-22. The repository went public the same day. The PyPI package has not yet been published; that step is deferred pending separate authorization.
