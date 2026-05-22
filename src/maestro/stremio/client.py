@@ -7,14 +7,20 @@ Speaks the Stremio addon protocol:
 
 Also wraps Cinemeta search for title -> imdb_id resolution.
 
-URL normalization policy (CF3 uniform):
+URL normalization policy (CF3 + CF13 uniform):
   Both bare base URLs (``https://addon.example``) and manifest-suffixed
   URLs (``https://addon.example/manifest.json``) are accepted on input
   and normalized to the bare base form at the boundary via
-  ``_normalize_addon_base_url``. The bare base form is used for path
+  :func:`normalize_addon_base_url`. The bare base form is used for path
   composition in ``query_stream``; ``get_manifest`` re-appends
   ``/manifest.json`` after normalization. Addon URLs are never stored
   with the ``/manifest.json`` suffix internally.
+
+  ``normalize_addon_base_url`` is the package-level public normalizer
+  (CF13 resolution, Phase 8): the diagnose domain's stack_health probe
+  needs the same normalization. Promoting from the previous
+  ``_normalize_addon_base_url`` private form consolidates the policy
+  to a single import site.
 
 Best-effort by protocol — no tenacity wrapping. A slow addon should
 fail fast (``AddonTimeout``) rather than burn the timeout budget on
@@ -38,13 +44,17 @@ log = structlog.get_logger("maestro.stremio.client")
 CINEMETA_BASE = "https://v3-cinemeta.strem.io"
 
 
-def _normalize_addon_base_url(addon_url: str) -> str:
+def normalize_addon_base_url(addon_url: str) -> str:
     """Return the addon base URL without trailing slash or ``/manifest.json`` suffix.
 
     Accepts either bare (``https://addon.example``) or manifest-suffixed
     (``https://addon.example/manifest.json``) input. Trailing slashes are
     stripped after suffix removal so ``https://addon.example/manifest.json/``
     normalizes to ``https://addon.example`` as well.
+
+    Public per CF13 (Phase 8): the diagnose stack_health probe needs the
+    same normalization the Stremio client uses, so the function is exposed
+    rather than duplicated.
     """
     return addon_url.rstrip("/").removesuffix("/manifest.json").rstrip("/")
 
@@ -65,7 +75,7 @@ class StremioAddonClient:
         Accepts either bare or manifest-suffixed input; both normalize
         to the same request URL.
         """
-        base = _normalize_addon_base_url(addon_url)
+        base = normalize_addon_base_url(addon_url)
         url = f"{base}/manifest.json"
         log.info("stremio_get_manifest_request", url=url)
         try:
@@ -94,7 +104,7 @@ class StremioAddonClient:
 
         Series queries include ``:season:episode``; movie queries omit them.
         """
-        base = _normalize_addon_base_url(addon_url)
+        base = normalize_addon_base_url(addon_url)
         if season is not None and episode is not None:
             path = f"/stream/{content_type}/{imdb_id}:{season}:{episode}.json"
         else:
