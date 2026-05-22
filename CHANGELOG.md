@@ -5,6 +5,12 @@ All notable changes to Maestro will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `REVIEW-CAMPAIGN-2026.md` at the repo root — public-facing roadmap for the systematic code-review campaign on this repository (Gemini Code Assist auto-review plus `/octo:review` triangulation plus independent project-scoped review session, eight subsystem-scoped review PRs targeting `master`)
+
 ## [0.1.0] — 2026-05-22
 
 ### Added
