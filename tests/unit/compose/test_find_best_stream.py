@@ -198,3 +198,215 @@ async def test_no_cached_streams_without_fallback_returns_failure(
     )
     assert not result.ok
     assert result.suggestion is not None
+
+
+@pytest.mark.asyncio
+async def test_extract_filename_finds_filename_line_in_multiline_title(
+    learner: FilterGateLearner,
+) -> None:
+    """Regression: multi-line AIOStreams titles put the real filename on line 2+.
+
+    Line 0 is the human episode label (no release tags). The filename line
+    (often prefixed with a folder emoji) carries WEB-DL/AMZN/etc that
+    filter-gate cares about. The old _extract_filename took line 0 and silently
+    returned LOW risk -- breaking filter-gate-aware sort. With the fix, line 2
+    is selected (it contains .mkv), predict_risk sees "WEB-DL", returns HIGH,
+    and require_cached + fallback_to_uncached=False produces a filter_gate_block
+    Attempt instead of attempting unrestrict.
+    """
+    cinemeta_search = AsyncMock(return_value="tt9")
+    multiline_title = (
+        "S01E03 - Episode Name\n"
+        "[FOLDER] Show.S01E03.1080p.WEB-DL.AMZN.mkv\n"
+        "[SIZE] 8.2 GB\n"
+        "[SEEDERS] 200 seeders"
+    )
+    stremio_query = AsyncMock(
+        return_value=[
+            {"infoHash": "h1", "title": multiline_title, "url": "https://r/1"},
+        ]
+    )
+    rd_check_cache = AsyncMock(return_value={"h1": {"cached": True, "files": {}}})
+    rd_unrestrict = AsyncMock(return_value={"download": "https://rd.example/cdn/x.mkv"})
+
+    result = await find_best_stream(
+        title="x",
+        content_type="series",
+        season=1,
+        episode=3,
+        preferred_languages=[],
+        exclude_quality=[],
+        require_cached=True,
+        fallback_to_uncached=False,
+        aiostreams_addon_url="https://x",
+        learner=learner,
+        cinemeta_search=cinemeta_search,
+        stremio_query=stremio_query,
+        rd_check_cache=rd_check_cache,
+        rd_unrestrict=rd_unrestrict,
+        budget_s=60.0,
+    )
+    assert not result.ok
+    assert len(result.attempts) == 1
+    assert result.attempts[0].status == "filter_gate_block"
+    # The filename recorded on the Attempt should be the .mkv line, not line 0
+    assert result.attempts[0].filename is not None
+    assert ".mkv" in result.attempts[0].filename
+    rd_unrestrict.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_budget_exhaustion_returns_timeout_attempt(
+    learner: FilterGateLearner,
+) -> None:
+    """budget_s=0.0 trips the in-loop timeout check on the first iteration."""
+    cinemeta_search = AsyncMock(return_value="tt9")
+    stremio_query = AsyncMock(
+        return_value=[
+            {"infoHash": "h1", "title": "S01E03.1080p.BluRay.mkv", "url": "https://r/1"},
+        ]
+    )
+    rd_check_cache = AsyncMock(return_value={"h1": {"cached": True}})
+    rd_unrestrict = AsyncMock(return_value={"download": "https://rd.example/cdn/x.mkv"})
+
+    result = await find_best_stream(
+        title="x",
+        content_type="series",
+        season=1,
+        episode=3,
+        preferred_languages=[],
+        exclude_quality=[],
+        require_cached=True,
+        fallback_to_uncached=False,
+        aiostreams_addon_url="https://x",
+        learner=learner,
+        cinemeta_search=cinemeta_search,
+        stremio_query=stremio_query,
+        rd_check_cache=rd_check_cache,
+        rd_unrestrict=rd_unrestrict,
+        budget_s=0.0,
+    )
+    assert not result.ok
+    assert result.attempts[-1].status == "timeout"
+    assert result.suggestion is not None
+    rd_unrestrict.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_cached_high_risk_filter_gate_blocks_when_no_fallback(
+    learner: FilterGateLearner,
+) -> None:
+    """A single cached candidate flagged HIGH risk produces a filter_gate_block."""
+    cinemeta_search = AsyncMock(return_value="tt9")
+    stremio_query = AsyncMock(
+        return_value=[
+            {
+                "infoHash": "h1",
+                "title": "Show.S01E03.1080p.WEB-DL.AMZN.mkv",
+                "url": "https://r/1",
+            },
+        ]
+    )
+    rd_check_cache = AsyncMock(return_value={"h1": {"cached": True, "files": {}}})
+    rd_unrestrict = AsyncMock(return_value={"download": "https://rd.example/cdn/x.mkv"})
+
+    result = await find_best_stream(
+        title="x",
+        content_type="series",
+        season=1,
+        episode=3,
+        preferred_languages=[],
+        exclude_quality=[],
+        require_cached=True,
+        fallback_to_uncached=False,
+        aiostreams_addon_url="https://x",
+        learner=learner,
+        cinemeta_search=cinemeta_search,
+        stremio_query=stremio_query,
+        rd_check_cache=rd_check_cache,
+        rd_unrestrict=rd_unrestrict,
+        budget_s=60.0,
+    )
+    assert not result.ok
+    assert len(result.attempts) == 1
+    assert result.attempts[0].status == "filter_gate_block"
+    rd_unrestrict.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_no_url_attempt_when_stream_missing_url_field(
+    learner: FilterGateLearner,
+) -> None:
+    """A cached candidate without a url field produces a no_url Attempt."""
+    cinemeta_search = AsyncMock(return_value="tt9")
+    stremio_query = AsyncMock(
+        return_value=[
+            {"infoHash": "h1", "title": "S01E03.1080p.BluRay.mkv"},
+        ]
+    )
+    rd_check_cache = AsyncMock(return_value={"h1": {"cached": True}})
+    rd_unrestrict = AsyncMock()
+
+    result = await find_best_stream(
+        title="x",
+        content_type="series",
+        season=1,
+        episode=3,
+        preferred_languages=[],
+        exclude_quality=[],
+        require_cached=True,
+        fallback_to_uncached=False,
+        aiostreams_addon_url="https://x",
+        learner=learner,
+        cinemeta_search=cinemeta_search,
+        stremio_query=stremio_query,
+        rd_check_cache=rd_check_cache,
+        rd_unrestrict=rd_unrestrict,
+        budget_s=60.0,
+    )
+    assert not result.ok
+    assert len(result.attempts) == 1
+    assert result.attempts[0].status == "no_url"
+    rd_unrestrict.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_exclude_quality_filters_out_matching_streams(
+    learner: FilterGateLearner,
+) -> None:
+    """exclude_quality=['CAM'] drops the CAM candidate before unrestrict."""
+    cinemeta_search = AsyncMock(return_value="tt9")
+    stremio_query = AsyncMock(
+        return_value=[
+            {"infoHash": "h1", "title": "Show.2024.CAM.x264.mkv", "url": "https://r/cam"},
+            {"infoHash": "h2", "title": "Show.2024.1080p.BluRay.mkv", "url": "https://r/bluray"},
+        ]
+    )
+    rd_check_cache = AsyncMock(
+        return_value={
+            "h1": {"cached": True},
+            "h2": {"cached": True},
+        }
+    )
+    rd_unrestrict = AsyncMock(return_value={"download": "https://rd.example/cdn/x.mkv"})
+
+    result = await find_best_stream(
+        title="x",
+        content_type="movie",
+        season=None,
+        episode=None,
+        preferred_languages=[],
+        exclude_quality=["CAM"],
+        require_cached=True,
+        fallback_to_uncached=False,
+        aiostreams_addon_url="https://x",
+        learner=learner,
+        cinemeta_search=cinemeta_search,
+        stremio_query=stremio_query,
+        rd_check_cache=rd_check_cache,
+        rd_unrestrict=rd_unrestrict,
+        budget_s=60.0,
+    )
+    assert result.ok
+    # Only the BluRay stream should have reached unrestrict; CAM was filtered.
+    rd_unrestrict.assert_called_once_with("https://r/bluray")

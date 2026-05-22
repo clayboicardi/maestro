@@ -64,6 +64,12 @@ _LANG_TOKENS: tuple[str, ...] = (
     "hin",
 )
 
+# Media-file extensions used to identify the real-filename line inside a
+# multi-line `title` field. AIOStreams + many other Stremio addons format
+# titles like "Episode Label\n[folder] Show.S01E03.WEB-DL.mkv\n[size] 8.2 GB"
+# where the release-tag-bearing filename is NOT line 0.
+_MEDIA_EXTENSIONS: tuple[str, ...] = (".mkv", ".mp4", ".avi", ".webm", ".mov", ".m4v")
+
 _NO_CACHED_SUGGESTION = (
     "No cached candidates after filtering. Try fallback_to_uncached=True "
     "or check that RD is still serving cached results for this title."
@@ -317,13 +323,34 @@ async def _try_candidate(
 
 
 def _extract_filename(stream: dict[str, Any]) -> str | None:
-    """Pull a likely filename out of a stream dict."""
-    if "filename" in stream:
-        return stream["filename"]
+    """Pull a likely filename out of a stream dict.
+
+    AIOStreams + many other Stremio addons format the `title` field as
+    multi-line text where line 0 is the human episode label and a later
+    line contains the actual filename (often prefixed with a folder icon).
+    Scan every line for one containing a known media extension -- that's
+    the line carrying the release tags filter-gate cares about. Without
+    this, filter-gate-aware sort silently breaks because predict_risk is
+    fed "S01E03 - Episode Name" instead of the real release name.
+    """
+    explicit = stream.get("filename")
+    if explicit:
+        # Trust an explicit, non-empty filename field if present.
+        return explicit
     title = stream.get("title") or ""
-    if "\n" in title:
-        return title.splitlines()[0]
-    return title or None
+    if not title:
+        return None
+    lines = title.splitlines()
+    # Prefer the line containing a media extension (real filename).
+    for line in lines:
+        line_lower = line.lower()
+        if any(ext in line_lower for ext in _MEDIA_EXTENSIONS):
+            return line.strip()
+    # Fallback: first non-empty line.
+    for line in lines:
+        if line.strip():
+            return line.strip()
+    return title.strip() or None
 
 
 def _build_metadata(stream: dict[str, Any]) -> StreamMetadata:
