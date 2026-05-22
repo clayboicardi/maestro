@@ -44,8 +44,8 @@ async def test_find_best_stream_annotation_is_destructive() -> None:
     )
 
 
-async def test_total_tool_count_is_40() -> None:
-    """Phase 7.3 lock: 21 aiostreams + 5 torrentio + 7 realdebrid + 6 stremio + 1 compose."""
+async def test_total_tool_count_is_43() -> None:
+    """Phase 8 lock: 21 aiostreams + 5 torrentio + 7 realdebrid + 6 stremio + 1 compose + 3 diagnose."""
     mcp = create_server()
     tools = await mcp.list_tools()
-    assert len(tools) == 40
+    assert len(tools) == 43

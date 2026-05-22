@@ -21,6 +21,9 @@ _READ_EXACT = {
     "stremio_query_addon",
     "stremio_query_addons_parallel",
     "stremio_get_manifest",
+    "diagnose_stack_health",
+    "diagnose_rd_health",
+    "diagnose_dud_rate",
 }
 _COMPUTE_EXACT = {
     "stremio_dedupe_streams",

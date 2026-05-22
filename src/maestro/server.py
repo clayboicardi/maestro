@@ -15,6 +15,7 @@ from fastmcp import FastMCP
 from maestro.aiostreams import register_tools as register_aiostreams
 from maestro.compose import register_tools as register_compose
 from maestro.config import MaestroSettings
+from maestro.diagnose import register_tools as register_diagnose
 from maestro.logging import configure_logging
 from maestro.middleware import MaestroErrorMiddleware
 from maestro.realdebrid import register_tools as register_realdebrid
@@ -72,6 +73,13 @@ def create_server() -> FastMCP:
         learner=rd_toolset._learner,
         aiostreams_addon_url=str(settings.aiostreams_base_url),
         compose_budget_s=settings.compose_budget_s,
+    )
+    register_diagnose(
+        mcp,
+        addon_urls=[str(settings.aiostreams_base_url), str(settings.torrentio_base_url)],
+        rd_get_user_info=rd_toolset._client.get_user_info,
+        learner=rd_toolset._learner,
+        timeout_s=settings.http_timeout_s,
     )
     return mcp
 

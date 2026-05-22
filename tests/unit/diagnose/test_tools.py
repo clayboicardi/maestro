@@ -1,0 +1,76 @@
+"""Diagnostic tool tests."""
+
+from unittest.mock import AsyncMock
+
+import httpx
+import pytest
+import respx
+
+from maestro.diagnose.tools import DiagnoseToolset
+from maestro.realdebrid.filter_gate import FilterGateLearner
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_stack_health_pings_each_addon() -> None:
+    """Each configured addon's manifest is probed; per-addon status surfaces."""
+    respx.get("https://a.example/manifest.json").mock(
+        return_value=httpx.Response(200, json={"id": "a"})
+    )
+    respx.get("https://b.example/manifest.json").mock(return_value=httpx.Response(500))
+
+    toolset = DiagnoseToolset(
+        addon_urls=["https://a.example", "https://b.example"],
+        rd_get_user_info=None,
+        learner=FilterGateLearner(state_path=None),
+        timeout_s=5.0,
+    )
+    health = await toolset.stack_health()
+    assert health["addons"]["https://a.example"]["status"] == "ok"
+    assert health["addons"]["https://b.example"]["status"] == "error"
+
+
+@pytest.mark.asyncio
+async def test_rd_health_reports_auth_state() -> None:
+    """``rd_health`` returns authenticated=True and forwards RD user info."""
+    rd_user = AsyncMock(return_value={"username": "clay", "premium": 1})
+    learner = FilterGateLearner(state_path=None)
+
+    toolset = DiagnoseToolset(
+        addon_urls=[],
+        rd_get_user_info=rd_user,
+        learner=learner,
+        timeout_s=5.0,
+    )
+    health = await toolset.rd_health()
+    assert health["authenticated"] is True
+    assert health["username"] == "clay"
+
+
+@pytest.mark.asyncio
+async def test_rd_health_reports_filter_gate_learning_count() -> None:
+    """Learning state surfaces -- the count of runtime-promoted keywords."""
+    learner = FilterGateLearner(state_path=None)
+    learner.record_strike("x.NOVELKW.mkv", "infringing_file")
+
+    toolset = DiagnoseToolset(
+        addon_urls=[],
+        rd_get_user_info=AsyncMock(return_value={"username": "x"}),
+        learner=learner,
+        timeout_s=5.0,
+    )
+    health = await toolset.rd_health()
+    assert health["filter_gate"]["learned_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_dud_rate_returns_v1x_stub() -> None:
+    """v1.x stub -- explicit status flag so callers can branch on it."""
+    toolset = DiagnoseToolset(
+        addon_urls=[],
+        rd_get_user_info=None,
+        learner=FilterGateLearner(state_path=None),
+    )
+    result = await toolset.dud_rate(window="30d")
+    assert result["status"] == "not_implemented_v1"
+    assert result["window"] == "30d"
