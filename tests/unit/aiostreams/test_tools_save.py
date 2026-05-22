@@ -56,6 +56,22 @@ async def test_get_install_url_from_last_save(
 async def test_get_install_url_without_save_uses_fallback(
     toolset_with_install_url: AIOStreamsToolset,
 ) -> None:
-    """If never saved, fall back to constructing from instance + UUID."""
+    """If never saved, return empty string (no fallback URL construction yet)."""
     url = await toolset_with_install_url.get_install_url()
     assert url == ""
+
+
+@pytest.mark.asyncio
+async def test_noop_save_does_not_overwrite_install_url(
+    toolset_with_install_url: AIOStreamsToolset,
+) -> None:
+    """A no-op save() must not clobber the URL captured by a prior real save."""
+    await toolset_with_install_url.set_preferred_languages(["English"])
+    await toolset_with_install_url.save()  # real save sets _last_install_url
+    first_url = await toolset_with_install_url.get_install_url()
+    assert first_url.startswith("stremio://")
+
+    # Second save with nothing staged — must NOT touch _last_install_url
+    await toolset_with_install_url.save()
+    second_url = await toolset_with_install_url.get_install_url()
+    assert second_url == first_url
