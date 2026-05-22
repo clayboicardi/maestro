@@ -20,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `NoStreamsAvailable`, `TitleUnresolved`, and `CompositionFailure` now declare class-level `message` defaults. Previously these three composer-domain error subclasses inherited the empty default from `MaestroError`, so the MCP wire response's `message` field landed as `"CompositionFailure: "` (with trailing colon-space) when callers raised without explicitly setting `message=`. The wire payload's structured `data` was always populated; this fix makes the human-readable `message` useful for these three error types.
 
+### Security
+
+- `aiostreams._redact_secrets` now actually redacts. Previously, `aiostreams_get_config` (without `include_secrets=True`) and `aiostreams_get_services` returned debrid bearer tokens and third-party API keys raw because the redactor checked for a `credential` (singular) key while the upstream schema declares `credentials` (plural, dict-typed). The fix iterates `services[].credentials` dict values and adds redaction for nine top-level sensitive fields (`encryptedPassword`, `addonPassword`, `rpdbApiKey`, `topPosterApiKey`, `aioratingsApiKey`, `openposterdbApiKey`, `tmdbAccessToken`, `tmdbApiKey`, `tvdbApiKey`) plus the optional `proxy.credentials` Proxy2 surface. The test fixture and assertions are updated to match the upstream schema; positive and negative coverage pins the contract. Bug present since Phase 3 implementation, shipped in v0.1.0.
+
 ## [0.1.0] — 2026-05-22
 
 ### Added

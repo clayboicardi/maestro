@@ -21,6 +21,22 @@ log = structlog.get_logger("maestro.aiostreams.tools")
 
 REDACTED = "***REDACTED***"
 
+# Top-level config keys carrying sensitive values that callers must not
+# surface through MCP tool reads unless include_secrets=True. Sourced
+# from maestro.aiostreams.schemas_generated.UserDataSchema -- if upstream
+# adds new credential-bearing fields, this list MUST be extended.
+_TOP_LEVEL_SECRET_KEYS: tuple[str, ...] = (
+    "encryptedPassword",
+    "addonPassword",
+    "rpdbApiKey",
+    "topPosterApiKey",
+    "aioratingsApiKey",
+    "openposterdbApiKey",
+    "tmdbAccessToken",
+    "tmdbApiKey",
+    "tvdbApiKey",
+)
+
 # Resolution floor ladder — must remain a subset of
 # maestro.aiostreams.schemas_generated.ExcludedResolution.
 # Ordered lowest→highest. "Unknown" intentionally excluded since it
@@ -39,10 +55,82 @@ _RESOLUTION_LADDER: list[str] = [
 
 
 def _redact_secrets(config: dict[str, Any]) -> dict[str, Any]:
+    """Return a deepcopy of ``config`` with sensitive values redacted.
+
+    AIOStreams stores sensitive material in three places per the upstream
+    UserDataSchema (see :mod:`maestro.aiostreams.schemas_generated`):
+
+    1. ``services[].credentials`` -- a ``dict[str, str]`` keyed by
+       credential name (e.g. ``{"apiKey": "rd_..."}``). Each value is
+       replaced with ``REDACTED``; keys are preserved so callers know
+       which credential names are configured. If a service entry
+       carries a non-dict credentials value (legacy schema or
+       malformed upstream), the value is replaced wholesale with
+       ``REDACTED`` and a warning is logged so unexpected shapes
+       surface in operations.
+    2. Top-level API tokens and passwords listed in
+       :data:`_TOP_LEVEL_SECRET_KEYS`. Each present key's value is
+       replaced with ``REDACTED``; absent keys remain absent. A
+       schema-fidelity test
+       (``tests/schema_fidelity/test_secret_keys_coverage.py``) enforces
+       that every UserDataSchema top-level field matching a
+       sensitive-suffix regex appears in this tuple, so upstream schema
+       additions surface in CI rather than silently leaking.
+    3. ``proxy.credentials`` (Proxy2 schema, currently ``str | None``
+       per upstream). The dict shape is handled defensively in case the
+       schema evolves like ``services.credentials`` did -- string
+       values get the wholesale ``REDACTED`` replacement; dict values
+       get ``dict.fromkeys(creds, REDACTED)``.
+
+    Any read path that surfaces config through an MCP tool MUST call
+    this redactor unless the caller has explicitly opted into
+    ``include_secrets``.
+
+    Defensive against null/missing fields: ``services: None``,
+    ``services`` absent, and ``proxy: None`` are all safe no-ops for
+    that section.
+
+    Implementation note: the deepcopy is load-bearing because
+    ``services`` is a list of dicts -- a shallow outer copy would share
+    the inner service dict objects, so writing
+    ``service["credentials"][k] = REDACTED`` on the copy would mutate
+    the originals. Python strings are immutable, so it is the
+    dict-list-dict nesting that requires deepcopy, not the credential
+    string values themselves.
+    """
     out = deepcopy(config)
-    for service in out.get("services", []):
-        if "credential" in service:
-            service["credential"] = REDACTED
+
+    # Per-service credentials (dict of credential-name -> value per schema;
+    # `or []` guards against the upstream `services: null` case; non-dict
+    # creds get defensively redacted + logged so schema drift surfaces).
+    for service in out.get("services") or []:
+        creds = service.get("credentials")
+        if isinstance(creds, dict):
+            service["credentials"] = dict.fromkeys(creds, REDACTED)
+        elif creds is not None:
+            log.warning(
+                "aiostreams_unexpected_credentials_type",
+                type=type(creds).__name__,
+                service_id=service.get("id"),
+            )
+            service["credentials"] = REDACTED
+
+    # Top-level sensitive fields.
+    for key in _TOP_LEVEL_SECRET_KEYS:
+        if key in out:
+            out[key] = REDACTED
+
+    # Optional proxy credentials (Proxy2 surface; currently str | None per
+    # schema, dict shape handled defensively in case Proxy2 evolves the
+    # way Service5 did).
+    proxy = out.get("proxy")
+    if isinstance(proxy, dict):
+        proxy_creds = proxy.get("credentials")
+        if isinstance(proxy_creds, dict):
+            proxy["credentials"] = dict.fromkeys(proxy_creds, REDACTED)
+        elif proxy_creds is not None:
+            proxy["credentials"] = REDACTED
+
     return out
 
 
