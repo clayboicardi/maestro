@@ -7,14 +7,18 @@ and Stremio toolsets. The composer itself is sub-domain agnostic (takes
 callables) so it stays unit-testable without an MCP server or live
 upstream endpoints.
 
-This module is the ONLY place that reaches into RD + Stremio toolset
-internals (``rd_toolset._client``, ``rd_toolset._learner``,
-``stremio_toolset._client``). The cross-domain wiring needs the
-underlying client + learner references; the per-domain toolsets don't
-expose public accessors because no other consumer needed them. Promoting
-those private refs to public attributes would force per-domain file
-changes for one downstream consumer (this composer); keeping the private
-access LOCALIZED HERE is the smaller-blast-radius option, and the
+This module is one of two cross-domain wiring sites that reach into
+RD + Stremio toolset internals (``rd_toolset._client``,
+``rd_toolset._learner``, ``stremio_toolset._client``). The other is
+:func:`maestro.diagnose.register_tools`, which reaches into
+``rd_toolset._client.get_user_info`` and ``rd_toolset._learner`` for
+the diagnostics tool surface. Both are server-boot-time wiring (see
+``server.py``); neither is steady-state code. The per-domain toolsets
+don't expose public accessors because the only consumers needing those
+refs are the cross-domain registrars themselves. Promoting the private
+refs to public attributes would force per-domain file changes for two
+downstream consumers; keeping the private access LOCALIZED at the
+server-boot wiring is the smaller-blast-radius option, and the
 violation is documented + intentional rather than incidental.
 
 Surfaces a single MCP tool: ``find_best_stream``, annotated as
