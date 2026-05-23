@@ -129,7 +129,10 @@ def _sanitize_url_for_message(url: str) -> str:
     """
     try:
         parsed = urlparse(url)
-        host = parsed.hostname or parsed.netloc
+        # Never fall back to parsed.netloc -- it can contain user:pass@ userinfo on
+        # malformed URLs where parsed.hostname is None. Empty-string fallback ensures
+        # no userinfo leak even in the unparseable-host edge case.
+        host = parsed.hostname or ""
         scheme = parsed.scheme or "https"
         return f"{scheme}://{host}{parsed.path}"
     except (ValueError, AttributeError):
