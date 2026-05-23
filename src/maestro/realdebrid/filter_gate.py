@@ -254,20 +254,30 @@ class FilterGateLearner:
         when ``state_path`` is None, so this is safe for both production
         and test wiring.
 
-        Persistence semantics: persists whenever the underlying
-        ``record_strike`` could have mutated state (i.e., ``rd_error_code
-        == "infringing_file"``), regardless of whether a NEW keyword was
-        promoted or an existing keyword's count was incremented. This
-        matters for :data:`LEARNED_PROMOTION_THRESHOLD` transitions: a
-        count-2 keyword that just became active in memory would otherwise
-        regress to count-1 (below threshold, LOW-risk) on process restart,
-        making the runtime-learning loop volatile across restarts.
+        Persistence semantics: persists ONLY when ``record_strike``
+        actually mutated ``learned_keywords`` (new keyword promoted OR
+        existing keyword's count incremented). Detected by comparing the
+        evidence-count total before and after the call. This matters in
+        two directions:
+
+        - **Forward**: a count-2 keyword that just became active in
+          memory must be persisted, or it regresses to count-1 (below
+          :data:`LEARNED_PROMOTION_THRESHOLD`, LOW-risk) on process
+          restart, making the runtime-learning loop volatile.
+        - **Backward**: no-mutation paths (empty filename, regex
+          matches nothing, all extracted tokens already in
+          :data:`KNOWN_KEYWORDS`) must NOT trigger ``save_state``,
+          because ``save_state`` can raise on an unwritable state path
+          and the composer caller is not wrapped in try/except --
+          unconditional save would crash flows that previously survived.
 
         Returns the same value as ``record_strike`` -- the list of newly
         promoted keywords -- so callers can still log the diagnostics.
         """
+        before = sum(e.count for e in self.learned_keywords.values())
         promoted = self.record_strike(filename, rd_error_code)
-        if rd_error_code == "infringing_file":
+        after = sum(e.count for e in self.learned_keywords.values())
+        if after != before:
             self.save_state()
         return promoted
 

@@ -131,6 +131,31 @@ def test_record_strike_and_persist_skips_save_when_no_promotion(tmp_path: Path) 
     assert not state_path.exists()  # no I/O when nothing was promoted
 
 
+def test_record_strike_and_persist_skips_save_on_known_keyword_hit(tmp_path: Path) -> None:
+    """FF-1 regression: infringing_file on an all-KNOWN_KEYWORDS filename must not write.
+
+    Pre-fix-fix behavior saved on every infringing_file call regardless of mutation
+    -- so a strike on a filename whose tokens were all already in KNOWN_KEYWORDS
+    (no learned-keyword promotion possible) would still trigger save_state. Since
+    save_state can raise on an unwritable parent and the composer caller doesn't
+    wrap in try/except, this could crash flows that previously survived.
+    """
+    state_path = tmp_path / "state.json"
+    learner = FilterGateLearner(state_path=state_path)
+    promoted = learner.record_strike_and_persist("x.WEB-DL.AMZN.mkv", "infringing_file")
+    assert promoted == []
+    assert not state_path.exists()  # no mutation -> no I/O
+
+
+def test_record_strike_and_persist_skips_save_on_unmatchable_filename(tmp_path: Path) -> None:
+    """FF-1 regression: infringing_file on a filename with no extractable tokens must not write."""
+    state_path = tmp_path / "state.json"
+    learner = FilterGateLearner(state_path=state_path)
+    promoted = learner.record_strike_and_persist("abc.mkv", "infringing_file")
+    assert promoted == []
+    assert not state_path.exists()
+
+
 def test_record_strike_and_persist_persists_count_increments(tmp_path: Path) -> None:
     """Regression: count increments on existing keywords must persist across restarts.
 
