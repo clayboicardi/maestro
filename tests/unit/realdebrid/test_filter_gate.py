@@ -131,6 +131,100 @@ def test_record_strike_and_persist_skips_save_when_no_promotion(tmp_path: Path) 
     assert not state_path.exists()  # no I/O when nothing was promoted
 
 
+def test_record_strike_and_persist_skips_save_on_known_keyword_hit(tmp_path: Path) -> None:
+    """FF-1 regression: infringing_file on an all-KNOWN_KEYWORDS filename must not write.
+
+    Pre-fix-fix behavior saved on every infringing_file call regardless of mutation
+    -- so a strike on a filename whose tokens were all already in KNOWN_KEYWORDS
+    (no learned-keyword promotion possible) would still trigger save_state. Since
+    save_state can raise on an unwritable parent and the composer caller doesn't
+    wrap in try/except, this could crash flows that previously survived.
+    """
+    state_path = tmp_path / "state.json"
+    learner = FilterGateLearner(state_path=state_path)
+    promoted = learner.record_strike_and_persist("x.WEB-DL.AMZN.mkv", "infringing_file")
+    assert promoted == []
+    assert not state_path.exists()  # no mutation -> no I/O
+
+
+def test_record_strike_and_persist_skips_save_on_unmatchable_filename(tmp_path: Path) -> None:
+    """FF-1 regression: infringing_file on a filename with no extractable tokens must not write."""
+    state_path = tmp_path / "state.json"
+    learner = FilterGateLearner(state_path=state_path)
+    promoted = learner.record_strike_and_persist("abc.mkv", "infringing_file")
+    assert promoted == []
+    assert not state_path.exists()
+
+
+def test_record_strike_and_persist_persists_count_increments(tmp_path: Path) -> None:
+    """Regression: count increments on existing keywords must persist across restarts.
+
+    Pre-fix behavior persisted only when a NEW keyword was promoted, so the
+    second strike (which crosses ``LEARNED_PROMOTION_THRESHOLD``) did not reach
+    disk. Process restart loaded count=1, dropping the keyword back below
+    threshold and making the runtime-learning loop volatile across restarts.
+    """
+    state_path = tmp_path / "state.json"
+    learner = FilterGateLearner(state_path=state_path)
+
+    learner.record_strike_and_persist("a.REGRESSKW.mkv", "infringing_file")
+    learner.record_strike_and_persist("b.REGRESSKW.mkv", "infringing_file")
+
+    assert learner.learned_keywords["REGRESSKW"].count == 2
+    assert learner.predict_risk("c.REGRESSKW.mkv") == RiskLevel.HIGH
+
+    restarted = FilterGateLearner(state_path=state_path)
+    restarted.load_state()
+    assert restarted.learned_keywords["REGRESSKW"].count == 2
+    assert restarted.predict_risk("c.REGRESSKW.mkv") == RiskLevel.HIGH
+
+
+def test_load_state_recovers_from_schema_mismatch(tmp_path: Path) -> None:
+    """load_state must not raise on a ValidationError -- recovery is silent.
+
+    A future maestro version that adds a required LearnEvidence field would
+    cause model_validate to raise when loading older state. The recovery
+    contract is "log and drop"; learned_keywords stays empty so the learner
+    re-populates from future strikes.
+    """
+    state_path = tmp_path / "state.json"
+    state_path.write_text(json.dumps({"learned_keywords": {"KW": {"count": "not-an-int"}}}))
+    learner = FilterGateLearner(state_path=state_path)
+    learner.load_state()  # must not raise
+    assert learner.learned_keywords == {}
+
+
+def test_load_state_recovers_from_non_utf8_bytes(tmp_path: Path) -> None:
+    """FF-2 regression: load_state must not raise on non-UTF-8 bytes.
+
+    S-4 added encoding="utf-8" to read_text, which introduced a
+    UnicodeDecodeError failure mode that fires BEFORE the JSONDecodeError
+    branch can catch it. Without explicit handling, the M-3 "never raises
+    on bad state" contract would be defeated for non-UTF-8 corruption
+    -- and register_tools calls load_state at startup, so server boot
+    would crash.
+    """
+    state_path = tmp_path / "state.json"
+    state_path.write_bytes(b"\xff\xfe\x00\x00not-valid-utf8")
+    learner = FilterGateLearner(state_path=state_path)
+    learner.load_state()  # must not raise
+    assert learner.learned_keywords == {}
+
+
+def test_load_state_recovers_from_non_dict_root(tmp_path: Path) -> None:
+    """load_state must not raise on a non-dict JSON root -- recovery is silent.
+
+    An on-disk file whose JSON root is a list/string/number (not a dict)
+    would hit AttributeError when calling .get on it. Recovery is the same
+    "log and drop"; learned_keywords stays empty.
+    """
+    state_path = tmp_path / "state.json"
+    state_path.write_text(json.dumps(["not", "a", "dict"]))
+    learner = FilterGateLearner(state_path=state_path)
+    learner.load_state()  # must not raise
+    assert learner.learned_keywords == {}
+
+
 def test_export_state_includes_known_and_learned() -> None:
     """export_state surfaces both the static baseline and runtime-learned keywords."""
     learner = FilterGateLearner()

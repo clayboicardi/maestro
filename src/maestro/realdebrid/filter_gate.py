@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Any
 
 import structlog
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 log = structlog.get_logger("maestro.realdebrid.filter_gate")
 
@@ -44,7 +44,14 @@ KNOWN_KEYWORDS: set[str] = {
 
 # Learned keywords influence predict_risk only after this many strikes.
 # Guards against false-positive promotion of episode tags / codec markers
-# (S01E03, DDP5, etc.) that share the regex shape but aren't filter-gate keywords.
+# (S01E03, DDP5, etc.) that share the regex shape but aren't filter-gate
+# keywords. The threshold is intentionally low (2 strikes) because RD
+# filter-gate keywords pattern as release-group tags that recur across
+# many filenames -- a true filter-gate keyword should hit the threshold
+# within a few candidate runs, while episode/codec markers stay below it
+# because they don't repeat across different content. Tune upward only if
+# false-positive rate climbs in production; tune downward only if real
+# filter-gate keywords are taking too many strikes to surface.
 LEARNED_PROMOTION_THRESHOLD: int = 2
 
 
@@ -61,13 +68,102 @@ class LearnEvidence(BaseModel):
 
 
 class FilterGateLearner:
-    """Tracks runtime evidence + predicts risk for a given filename."""
+    """Tracks runtime evidence + predicts risk for a given filename.
+
+    Three-piece state:
+
+    1. ``KNOWN_KEYWORDS`` (module-level constant) -- static baseline
+       from observed May 2026 filter-gate behavior. Read-only after
+       import; mutating this set is not the supported extension path.
+    2. ``self.learned_keywords`` -- runtime-promoted candidates with
+       per-keyword evidence (strike count + first-seen timestamp).
+       Mutated via :meth:`record_strike` / :meth:`record_strike_and_persist`.
+    3. ``self.state_path`` -- optional persistence target. When
+       ``None`` (test wiring), the learner operates entirely in
+       memory; :meth:`save_state` and :meth:`load_state` are silent
+       no-ops.
+
+    Side-effect contract:
+
+    - :meth:`predict_risk` and :meth:`matched_keywords` are pure
+      reads against the current ``learned_keywords`` state -- no
+      mutation, no I/O, safe to call from any context.
+    - :meth:`record_strike` mutates ``learned_keywords`` in memory.
+      No persistence -- caller must invoke :meth:`save_state`
+      explicitly OR use :meth:`record_strike_and_persist` to bundle.
+    - :meth:`save_state` writes via atomic-replace (sibling ``.tmp``
+      then ``Path.replace``) to give readers a consistent view;
+      durability is best-effort (no ``fsync``, so power-loss between
+      write and rename can leave a torn or zero-byte ``.tmp`` --
+      recoverable since the next save overwrites it). Failure raises
+      (e.g., ``PermissionError`` on a non-writable parent dir) --
+      caller's choice whether to retry or proceed with in-memory state.
+    - :meth:`load_state` is best-effort: corrupt JSON is logged and
+      the in-memory state is left as-initialized (empty learned
+      keywords). Caller will re-learn from subsequent strikes.
+
+    Persistence guarantees:
+
+    - **Atomic for readers**: yes -- ``Path.replace`` is atomic on
+      POSIX and atomic-within-same-volume on Windows, so readers never
+      observe a partially-written state file.
+    - **Durable on power-loss**: NO -- no ``fsync`` before the rename,
+      so a torn or zero-byte ``.tmp`` can survive a power cut between
+      ``write_text`` and ``replace``. The next save overwrites the
+      torn ``.tmp``; the state file itself is untouched until the
+      rename completes.
+    - **Schema versioning**: NOT IMPLEMENTED in v1. The on-disk JSON
+      shape is ``{"learned_keywords": {<keyword>: {<LearnEvidence>}}}``
+      with no version field. State is recoverable from
+      ``KNOWN_KEYWORDS`` + future strikes if the file is ever
+      discarded due to a schema mismatch on a future maestro version.
+    - **Concurrency**: single-process, single-writer assumed. No file
+      lock and all writers share the same ``<state_path>.tmp`` sibling,
+      so concurrent writers interleave on the ``write_text``/``replace``
+      pair: lost writes (last-writer-wins on ``replace``) in the lucky
+      case, raised ``OSError`` (e.g., ``FileNotFoundError`` when one
+      writer's ``replace`` moves a tmp away before another's
+      ``replace`` runs) in the unlucky case. Not a concern in
+      stdio-MCP deployment but worth documenting for future HTTP/SSE
+      transport migration.
+
+    Concurrency within a single process is single-coroutine: FastMCP
+    serializes tool invocations per session, and the learner is owned
+    by one :class:`.tools.RDToolset` per server lifetime.
+    """
 
     def __init__(self, state_path: Path | str | None = None) -> None:
+        """Construct an in-memory learner; pass ``state_path`` to enable persistence.
+
+        ``state_path`` accepts a :class:`pathlib.Path`, a string path
+        (``~`` expanded), or ``None`` for memory-only mode. The path
+        is normalized once at construction; subsequent ``save_state``/
+        ``load_state`` calls reuse the stored value.
+
+        Path validation is deferred to first save: the constructor stores
+        ``state_path`` without checking writability of the parent
+        directory. A first :meth:`save_state` against a read-only parent
+        raises ``PermissionError`` from the implicit
+        ``mkdir(parents=True)`` call.
+        """
         self.state_path: Path | None = Path(state_path).expanduser() if state_path else None
         self.learned_keywords: dict[str, LearnEvidence] = {}
 
     def predict_risk(self, filename: str | None) -> RiskLevel:
+        """Return the predicted filter-gate risk for ``filename``.
+
+        - ``None`` or empty filename -> :attr:`RiskLevel.UNKNOWN`
+        - Any :data:`KNOWN_KEYWORDS` substring match (case-insensitive)
+          -> :attr:`RiskLevel.HIGH`
+        - Any promoted learned keyword (evidence count >=
+          :data:`LEARNED_PROMOTION_THRESHOLD`) substring match ->
+          :attr:`RiskLevel.HIGH`
+        - Otherwise -> :attr:`RiskLevel.LOW`
+
+        Note: :attr:`RiskLevel.MEDIUM` is reserved for future
+        gradient-based heuristics; today the classifier is binary
+        below the UNKNOWN guard. Pure read; no mutation.
+        """
         if not filename:
             return RiskLevel.UNKNOWN
         upper = filename.upper()
@@ -82,6 +178,15 @@ class FilterGateLearner:
         return RiskLevel.LOW
 
     def matched_keywords(self, filename: str | None) -> list[str]:
+        """Return the list of keywords matched against ``filename``.
+
+        Mirrors :meth:`predict_risk` but enumerates all hits rather
+        than stopping at the first. Useful for diagnostics in the
+        MCP cache-check response (surfaces WHICH keywords triggered
+        the risk classification). Promoted learned keywords appear
+        AFTER the known keywords in match order. Pure read; no
+        mutation.
+        """
         if not filename:
             return []
         upper = filename.upper()
@@ -107,6 +212,14 @@ class FilterGateLearner:
         Extracts UPPERCASE alphanumeric tokens (4+ chars) from the
         filename that aren't already in ``KNOWN_KEYWORDS``, and records
         evidence for each as a possible new filter-gate keyword.
+
+        Limitation: this regex captures only uppercase tokens. Mixed-case
+        or lowercase tags (e.g., ``WEBRip``, ``[eztv]``) are observable in
+        ``KNOWN_KEYWORDS`` but can NOT be learned from runtime strikes.
+        If future filter-gate keywords ship in non-uppercase form, this
+        regex must be widened (and captures normalized via ``.upper()``
+        to keep the dict-key stable -- :meth:`predict_risk` already
+        matches case-insensitively).
 
         Returns the list of newly-recorded keywords (for caller diagnostics).
         """
@@ -138,26 +251,51 @@ class FilterGateLearner:
     ) -> list[str]:
         """Convenience: ``record_strike`` then ``save_state`` in one call.
 
-        Use this from production callers (Phase 7 composer onward) to avoid
-        silent state loss when only the strike half of the pair is wired
-        up. ``save_state`` is a no-op when ``state_path`` is None, so this
-        is safe for both production and test wiring.
+        Use this from production callers (the future composer that owns
+        post-403 strike learning) to avoid silent state loss when only the
+        strike half of the pair is wired up. ``save_state`` is a no-op
+        when ``state_path`` is None, so this is safe for both production
+        and test wiring.
+
+        Persistence semantics: persists ONLY when ``record_strike``
+        actually mutated ``learned_keywords`` (new keyword promoted OR
+        existing keyword's count incremented). Detected by comparing the
+        evidence-count total before and after the call. This matters in
+        two directions:
+
+        - **Forward**: a count-2 keyword that just became active in
+          memory must be persisted, or it regresses to count-1 (below
+          :data:`LEARNED_PROMOTION_THRESHOLD`, LOW-risk) on process
+          restart, making the runtime-learning loop volatile.
+        - **Backward**: no-mutation paths (empty filename, regex
+          matches nothing, all extracted tokens already in
+          :data:`KNOWN_KEYWORDS`) must NOT trigger ``save_state``,
+          because ``save_state`` can raise on an unwritable state path
+          and the composer caller is not wrapped in try/except --
+          unconditional save would crash flows that previously survived.
 
         Returns the same value as ``record_strike`` -- the list of newly
         promoted keywords -- so callers can still log the diagnostics.
         """
+        before = sum(e.count for e in self.learned_keywords.values())
         promoted = self.record_strike(filename, rd_error_code)
-        if promoted:
+        after = sum(e.count for e in self.learned_keywords.values())
+        if after != before:
             self.save_state()
         return promoted
 
     def save_state(self) -> None:
-        """Persist learned keywords to ``state_path`` via atomic replace.
+        """Persist learned keywords; atomic for readers, best-effort for durability.
 
-        Writes to a sibling ``.tmp`` file then ``os.replace``s to avoid
-        torn writes if the process dies mid-flush. v1 omits schema_version
-        and entry caps -- state is recoverable from KNOWN_KEYWORDS + future
-        strikes if the file is ever discarded.
+        Writes to a sibling file at ``<state_path>.tmp`` (extension-
+        appended, not extension-replaced) then ``Path.replace``s onto
+        ``state_path``. The rename is atomic from a reader's POV
+        (``os.replace``), but the write itself doesn't ``fsync`` --
+        power-loss between ``write_text`` and ``replace`` can leave a
+        torn or zero-byte ``.tmp`` (recoverable: next save overwrites).
+        v1 omits schema_version and entry caps -- state is recoverable
+        from ``KNOWN_KEYWORDS`` + future strikes if the file is ever
+        discarded.
         """
         if self.state_path is None:
             return
@@ -166,21 +304,62 @@ class FilterGateLearner:
             "learned_keywords": {k: v.model_dump() for k, v in self.learned_keywords.items()}
         }
         tmp_path = self.state_path.with_suffix(self.state_path.suffix + ".tmp")
-        tmp_path.write_text(json.dumps(payload, indent=2))
+        tmp_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         tmp_path.replace(self.state_path)
 
     def load_state(self) -> None:
+        """Best-effort load of persisted learned keywords -- never raises on bad state.
+
+        No-op if ``state_path`` is ``None`` (memory-only mode) or the
+        file doesn't exist (first run, or state was discarded).
+
+        Recovery branches (all log a distinct warning and leave
+        ``learned_keywords`` as initialized -- empty -- so the learner
+        re-populates from future :meth:`record_strike` calls):
+
+        - **Corrupt JSON or non-UTF-8 bytes** (``json.JSONDecodeError``,
+          ``UnicodeDecodeError``): logs ``filter_gate_state_corrupt``.
+          Next :meth:`save_state` overwrites the corrupt file.
+        - **Schema mismatch** (``pydantic.ValidationError``): logs
+          ``filter_gate_state_schema_mismatch``. Fires when a future
+          maestro version adds a required ``LearnEvidence`` field that
+          older state files lack. v1 has no schema_version handshake;
+          recovery is "drop and re-learn from future strikes."
+        - **Unexpected root shape** (``AttributeError``): logs
+          ``filter_gate_state_schema_mismatch``. Fires when the JSON
+          root is not a dict (e.g., a list or a string).
+
+        Callers (currently :func:`.tools.register_tools`) can rely on
+        this method to never raise on a malformed or schema-drifted
+        state file. The only error that escapes is ``OSError`` from
+        ``read_text`` (unreadable file -- environment problem, not
+        a recoverable state problem).
+        """
         if self.state_path is None or not self.state_path.exists():
             return
         try:
-            data = json.loads(self.state_path.read_text())
-        except json.JSONDecodeError:
+            data = json.loads(self.state_path.read_text(encoding="utf-8"))
+            raw = data.get("learned_keywords", {})
+            self.learned_keywords = {k: LearnEvidence.model_validate(v) for k, v in raw.items()}
+        except (json.JSONDecodeError, UnicodeDecodeError):
             log.warning("filter_gate_state_corrupt", path=str(self.state_path))
-            return
-        raw = data.get("learned_keywords", {})
-        self.learned_keywords = {k: LearnEvidence.model_validate(v) for k, v in raw.items()}
+        except (ValidationError, AttributeError) as e:
+            log.warning(
+                "filter_gate_state_schema_mismatch",
+                path=str(self.state_path),
+                error=str(e),
+            )
 
     def export_state(self) -> dict[str, Any]:
+        """Return a serializable snapshot of the current state.
+
+        Returns ``{"known_keywords": <sorted_list>, "learned_keywords":
+        {<keyword>: {<LearnEvidence>}}}``. Intended for diagnostic /
+        introspection tools -- NOT used by
+        :meth:`save_state` (which writes only the ``learned_keywords``
+        slice, since ``KNOWN_KEYWORDS`` is a static constant). Pure
+        read; no I/O.
+        """
         return {
             "known_keywords": sorted(KNOWN_KEYWORDS),
             "learned_keywords": {k: v.model_dump() for k, v in self.learned_keywords.items()},

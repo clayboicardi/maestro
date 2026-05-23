@@ -73,6 +73,30 @@ class RDClient:
     One instance is bound to one API token. Construct with explicit
     args (not a settings object) so per-call timeouts / retry counts can
     be overridden by callers without rebuilding ``MaestroSettings``.
+
+    Lifecycle: the underlying ``httpx.AsyncClient`` is lazy-initialized
+    on first request (binding the ``Authorization: Bearer <token>``
+    header + timeout) and reused across calls within the same instance.
+    Call :meth:`aclose` to release the connection pool -- note that in
+    stdio-MCP deployments this is not currently invoked at shutdown
+    (process exit reclaims the sockets); see :meth:`aclose` for the
+    rationale.
+
+    Bearer-token handling: the API token is stored as a plain ``str``
+    on the instance (unwrapped from upstream ``SecretStr`` at the
+    register-tools boundary) and bound into the httpx default headers
+    on first :meth:`_get_client` call. The token is NOT logged at any
+    level -- structlog calls in this module log request metadata
+    (path, count, torrent_id) but never the token or the full headers
+    dict.
+
+    Retry semantics: only :class:`maestro.errors.UpstreamError` payloads
+    with ``is_transient=True`` are retried (5xx and explicit retry
+    signals). :class:`AuthError`, :class:`RateLimitError`, and 4xx
+    non-401/429 surface immediately -- callers should respect rate
+    limits and not re-issue inside the retry loop. ``Retry-After``
+    headers on 429s are parsed and surfaced on the typed payload;
+    defaults to 30s if missing or unparsable.
     """
 
     def __init__(
@@ -88,6 +112,14 @@ class RDClient:
         self._client: httpx.AsyncClient | None = None
 
     async def _get_client(self) -> httpx.AsyncClient:
+        """Return the lazy-initialized async HTTP client.
+
+        Constructs an ``httpx.AsyncClient`` on first call (binding the
+        ``Authorization: Bearer <token>`` header + timeout) and reuses
+        it on subsequent calls. The bearer token is sent on every
+        request via the default headers, so callers do not need to
+        pass it per-call. Resetting the pool requires :meth:`aclose`.
+        """
         if self._client is None:
             self._client = httpx.AsyncClient(
                 headers={"Authorization": f"Bearer {self._token}"},
@@ -96,6 +128,18 @@ class RDClient:
         return self._client
 
     async def aclose(self) -> None:
+        """Release the underlying connection pool.
+
+        Idempotent: safe to call multiple times. After close, the next
+        request lazily reinitializes the client (with the same bearer
+        token + timeout from construction).
+
+        Known trade-off: the stdio-MCP server does not call this
+        on shutdown -- process exit reclaims sockets, and FastMCP's
+        lifespan hooks do not currently expose a clean teardown signal
+        for per-domain clients. Revisit if maestro migrates to a
+        long-running transport (HTTP/SSE) where leaked pools matter.
+        """
         if self._client is not None:
             await self._client.aclose()
             self._client = None
@@ -168,7 +212,22 @@ class RDClient:
         *,
         data: dict[str, Any] | None = None,
     ) -> httpx.Response:
-        """Retry-wrapped request honoring per-instance ``retry_attempts``."""
+        """Retry-wrapped request honoring per-instance ``retry_attempts``.
+
+        Wraps :meth:`_do_request` in tenacity's ``AsyncRetrying`` with
+        the :func:`_is_transient` predicate (only ``UpstreamError``
+        payloads marked transient are retried; ``AuthError`` and
+        ``RateLimitError`` propagate immediately). Backoff is
+        exponential with a 1-4 second window.
+
+        ``response`` is typed ``Response | None`` so the type checker
+        accepts the initial state; on the success path the loop body
+        assigns it before exit. ``reraise=True`` ensures retry
+        exhaustion propagates the underlying exception rather than
+        tenacity's ``RetryError`` wrapper, so the assert never fires
+        in practice -- either the loop assigns ``response`` or it
+        raises.
+        """
         response: httpx.Response | None = None
         async for attempt in AsyncRetrying(
             retry=retry_if_exception(_is_transient),
