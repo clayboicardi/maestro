@@ -5,7 +5,35 @@ import pytest
 import respx
 
 from maestro.errors import AddonMalformed, AddonTimeout, MaestroException
-from maestro.stremio.client import StremioAddonClient
+from maestro.stremio.client import StremioAddonClient, normalize_addon_base_url
+
+
+def test_normalize_addon_base_url_preserves_query_string() -> None:
+    """G-FF-1 regression: manifest URLs with query strings (auth tokens) must round-trip.
+
+    Pre-fix: removesuffix('/manifest.json') failed to match against
+    'https://x/manifest.json?token=secret', leaving the query embedded in
+    the "base" so derived paths interleaved with it as
+    'https://x/manifest.json?token=secret/stream/...'. Now urlparse-based
+    normalization extracts the path slice and reattaches the query to the
+    base via urlunparse.
+    """
+    assert (
+        normalize_addon_base_url("https://addon.example/manifest.json?token=secret")
+        == "https://addon.example?token=secret"
+    )
+    # Bare base unchanged
+    assert normalize_addon_base_url("https://addon.example") == "https://addon.example"
+    # Manifest-suffixed without query
+    assert (
+        normalize_addon_base_url("https://addon.example/manifest.json")
+        == "https://addon.example"
+    )
+    # Trailing slash + manifest + trailing slash
+    assert (
+        normalize_addon_base_url("https://addon.example/manifest.json/")
+        == "https://addon.example"
+    )
 
 
 @pytest.fixture

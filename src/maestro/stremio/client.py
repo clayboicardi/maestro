@@ -48,7 +48,7 @@ Retry / timeout policy:
 from __future__ import annotations
 
 from typing import Any
-from urllib.parse import quote, urlparse
+from urllib.parse import quote, urlparse, urlunparse
 
 import httpx
 import structlog
@@ -69,21 +69,36 @@ def normalize_addon_base_url(addon_url: str) -> str:
     ``https://addon.example/manifest.json/`` normalizes to
     ``https://addon.example`` as well.
 
-    Limitation: query strings after ``/manifest.json`` (e.g.,
-    ``https://addon.example/manifest.json?token=X``) are NOT recognized.
-    ``removesuffix("/manifest.json")`` only matches the literal trailing
-    string, so the query stays attached to the "base" and re-appears in
-    derived paths like ``https://addon.example/manifest.json?token=X/stream/...``,
-    which addons will reject. Callers shipping authenticated/parameterized
-    manifest URLs must strip the query before passing in. A future
-    extension could parse + reattach the query against the bare base,
-    but v1 does not.
+    Query strings are PRESERVED via ``urlunparse``. An input like
+    ``https://addon.example/manifest.json?token=secret`` normalizes to
+    ``https://addon.example?token=secret`` -- the auth token survives
+    so callers using :func:`_compose_addon_url` for path joining will
+    correctly produce ``https://addon.example/stream/...?token=secret``
+    rather than the malformed ``https://addon.example?token=secret/stream/...``
+    the prior literal-string approach produced.
 
     Public symbol (re-exported from the package) so the diagnose
     domain's stack_health probe uses the SAME normalization the
     Stremio client uses internally.
     """
-    return addon_url.rstrip("/").removesuffix("/manifest.json").rstrip("/")
+    parsed = urlparse(addon_url)
+    new_path = parsed.path.rstrip("/").removesuffix("/manifest.json").rstrip("/")
+    return urlunparse(parsed._replace(path=new_path))
+
+
+def _compose_addon_url(base: str, path: str) -> str:
+    """Join ``base`` + ``path`` preserving the base's query string.
+
+    Direct f-string concatenation (``f"{base}{path}"``) mangles URLs
+    whose base carries a query string: ``"https://x?t=1" + "/stream/..."``
+    becomes ``"https://x?t=1/stream/..."``, which addons reject. This
+    helper round-trips through :func:`urlparse` / :func:`urlunparse`
+    so the query stays attached to the netloc, not embedded in the
+    path.
+    """
+    parsed = urlparse(base)
+    full_path = parsed.path.rstrip("/") + path
+    return urlunparse(parsed._replace(path=full_path))
 
 
 class StremioAddonClient:
@@ -124,7 +139,7 @@ class StremioAddonClient:
         - :class:`AddonMalformed` for invalid JSON in the response body.
         """
         base = normalize_addon_base_url(addon_url)
-        url = f"{base}/manifest.json"
+        url = _compose_addon_url(base, "/manifest.json")
         parsed = urlparse(url)
         log.info("stremio_get_manifest_request", host=parsed.netloc, path=parsed.path)
         try:
@@ -173,7 +188,7 @@ class StremioAddonClient:
             path = f"/stream/{content_type}/{imdb_id}:{season}:{episode}.json"
         else:
             path = f"/stream/{content_type}/{imdb_id}.json"
-        url = f"{base}{path}"
+        url = _compose_addon_url(base, path)
         parsed = urlparse(url)
         log.info(
             "stremio_query_stream_request",
