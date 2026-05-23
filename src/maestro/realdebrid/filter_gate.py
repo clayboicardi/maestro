@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Any
 
 import structlog
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 log = structlog.get_logger("maestro.realdebrid.filter_gate")
 
@@ -266,33 +266,49 @@ class FilterGateLearner:
         tmp_path.replace(self.state_path)
 
     def load_state(self) -> None:
-        """Best-effort load of persisted learned keywords.
+        """Best-effort load of persisted learned keywords -- never raises on bad state.
 
         No-op if ``state_path`` is ``None`` (memory-only mode) or the
-        file doesn't exist (first run, or state was discarded). On
-        corrupt JSON, logs ``filter_gate_state_corrupt`` and leaves
-        ``learned_keywords`` as initialized (empty). The learner will
-        re-populate from future :meth:`record_strike` calls; no
-        explicit reset or quarantine of the corrupt file (the next
-        successful :meth:`save_state` overwrites it).
+        file doesn't exist (first run, or state was discarded).
 
-        Note: pydantic ``LearnEvidence.model_validate`` will raise on
-        a schema mismatch (e.g., a future maestro version adds a
-        required field). v1 has no schema_version handshake; if
-        upstream maestro changes the on-disk shape, the load may
-        raise -- callers (currently :func:`.tools.register_tools`)
-        should treat the load as recoverable and fall back to an
-        empty in-memory state.
+        Recovery branches (all log a distinct warning and leave
+        ``learned_keywords`` as initialized -- empty -- so the learner
+        re-populates from future :meth:`record_strike` calls):
+
+        - **Corrupt JSON** (``json.JSONDecodeError``): logs
+          ``filter_gate_state_corrupt``. Next :meth:`save_state`
+          overwrites the corrupt file.
+        - **Schema mismatch** (``pydantic.ValidationError``): logs
+          ``filter_gate_state_schema_mismatch``. Fires when a future
+          maestro version adds a required ``LearnEvidence`` field that
+          older state files lack. v1 has no schema_version handshake;
+          recovery is "drop and re-learn from future strikes."
+        - **Unexpected root shape** (``AttributeError``): logs
+          ``filter_gate_state_schema_mismatch``. Fires when the JSON
+          root is not a dict (e.g., a list or a string).
+
+        Callers (currently :func:`.tools.register_tools`) can rely on
+        this method to never raise on a malformed or schema-drifted
+        state file. The only error that escapes is ``OSError`` from
+        ``read_text`` (unreadable file -- environment problem, not
+        a recoverable state problem).
         """
         if self.state_path is None or not self.state_path.exists():
             return
         try:
             data = json.loads(self.state_path.read_text())
+            raw = data.get("learned_keywords", {})
+            self.learned_keywords = {
+                k: LearnEvidence.model_validate(v) for k, v in raw.items()
+            }
         except json.JSONDecodeError:
             log.warning("filter_gate_state_corrupt", path=str(self.state_path))
-            return
-        raw = data.get("learned_keywords", {})
-        self.learned_keywords = {k: LearnEvidence.model_validate(v) for k, v in raw.items()}
+        except (ValidationError, AttributeError) as e:
+            log.warning(
+                "filter_gate_state_schema_mismatch",
+                path=str(self.state_path),
+                error=str(e),
+            )
 
     def export_state(self) -> dict[str, Any]:
         """Return a serializable snapshot of the current state.

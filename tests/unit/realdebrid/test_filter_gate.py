@@ -154,6 +154,37 @@ def test_record_strike_and_persist_persists_count_increments(tmp_path: Path) -> 
     assert restarted.predict_risk("c.REGRESSKW.mkv") == RiskLevel.HIGH
 
 
+def test_load_state_recovers_from_schema_mismatch(tmp_path: Path) -> None:
+    """load_state must not raise on a ValidationError -- recovery is silent.
+
+    A future maestro version that adds a required LearnEvidence field would
+    cause model_validate to raise when loading older state. The recovery
+    contract is "log and drop"; learned_keywords stays empty so the learner
+    re-populates from future strikes.
+    """
+    state_path = tmp_path / "state.json"
+    state_path.write_text(
+        json.dumps({"learned_keywords": {"KW": {"count": "not-an-int"}}})
+    )
+    learner = FilterGateLearner(state_path=state_path)
+    learner.load_state()  # must not raise
+    assert learner.learned_keywords == {}
+
+
+def test_load_state_recovers_from_non_dict_root(tmp_path: Path) -> None:
+    """load_state must not raise on a non-dict JSON root -- recovery is silent.
+
+    An on-disk file whose JSON root is a list/string/number (not a dict)
+    would hit AttributeError when calling .get on it. Recovery is the same
+    "log and drop"; learned_keywords stays empty.
+    """
+    state_path = tmp_path / "state.json"
+    state_path.write_text(json.dumps(["not", "a", "dict"]))
+    learner = FilterGateLearner(state_path=state_path)
+    learner.load_state()  # must not raise
+    assert learner.learned_keywords == {}
+
+
 def test_export_state_includes_known_and_learned() -> None:
     """export_state surfaces both the static baseline and runtime-learned keywords."""
     learner = FilterGateLearner()
