@@ -141,7 +141,10 @@ class StremioAddonClient:
         base = normalize_addon_base_url(addon_url)
         url = _compose_addon_url(base, "/manifest.json")
         parsed = urlparse(url)
-        log.info("stremio_get_manifest_request", host=parsed.netloc, path=parsed.path)
+        # Use hostname (not netloc) so any user:pass@ userinfo is stripped before logging.
+        log.info(
+            "stremio_get_manifest_request", host=parsed.hostname, path=parsed.path
+        )
         try:
             async with httpx.AsyncClient(timeout=self._timeout_s) as client:
                 response = await client.get(url, follow_redirects=True)
@@ -190,9 +193,10 @@ class StremioAddonClient:
             path = f"/stream/{content_type}/{imdb_id}.json"
         url = _compose_addon_url(base, path)
         parsed = urlparse(url)
+        # Use hostname (not netloc) so any user:pass@ userinfo is stripped before logging.
         log.info(
             "stremio_query_stream_request",
-            host=parsed.netloc,
+            host=parsed.hostname,
             path=parsed.path,
             content_type=content_type,
             imdb_id=imdb_id,
