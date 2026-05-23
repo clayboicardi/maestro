@@ -174,11 +174,18 @@ def _overlay_cache_and_risk(
     - ``_filter_gate_risk`` (str): the ``.value`` of the
       :class:`RiskLevel` returned by
       :meth:`FilterGateLearner.predict_risk` for the extracted
-      filename. The risk is computed once here, then RE-CHECKED at
-      attempt time in :func:`_try_candidate` -- consistent under
-      FastMCP's per-session serialization but theoretically vulnerable
-      to learner-state changes between the two reads if that contract
-      ever loosens.
+      filename. Computed ONCE here at the cache-overlay step; the
+      candidate loop in :func:`_try_candidate` reads this cached field
+      via ``candidate.get("_filter_gate_risk")`` rather than re-
+      invoking the learner. FastMCP's per-session serialization means
+      no concurrent strike-learning can mutate the learner between
+      the cache step and the loop, so the snapshot is fresh enough
+      for the duration of one composer call. If
+      :func:`_overlay_cache_and_risk` is ever modified to skip
+      candidates, the missing ``_filter_gate_risk`` field would cause
+      :func:`_try_candidate` to treat them as not-HIGH (since
+      ``None != "high"``) and attempt them unconditionally -- worth
+      noting if that optimization is ever made.
     - ``_filename`` (str | None): extracted via
       :func:`_extract_filename`. ``None`` if no filename could be
       determined; downstream :meth:`record_strike_and_persist` receives
