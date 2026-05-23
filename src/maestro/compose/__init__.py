@@ -98,11 +98,12 @@ def register_tools(
         Defaulting policy applied here (before delegating to the
         composer):
 
-        - ``preferred_languages`` defaults to ``["English"]`` -- the
-          consumer can pass an explicit list to override.
-        - ``exclude_quality`` defaults to ``["CAM", "TS", "SCR", "R5",
-          "R6"]`` -- common low-quality release types most consumers
-          want filtered.
+        - ``preferred_languages``: ``None`` -> ``["English"]``; an
+          empty list ``[]`` is RESPECTED as "disable the language
+          filter" (uses ``is None`` check, not falsy-coerce).
+        - ``exclude_quality``: ``None`` -> ``["CAM", "TS", "SCR",
+          "R5", "R6"]``; an empty list ``[]`` is RESPECTED as
+          "exclude nothing."
 
         Returns the dict-serialized :class:`StreamResolution`. Inspect
         ``url`` (truthy iff success) and ``attempts`` (per-candidate
@@ -111,13 +112,22 @@ def register_tools(
         # Cross-domain composition needs the underlying client/learner refs;
         # the per-domain toolsets don't expose public accessors. Documented
         # and isolated to this single call site -- see package docstring.
+        # Defaulting uses `is None` to preserve explicit `[]` as "disable filter".
+        resolved_languages = (
+            preferred_languages if preferred_languages is not None else ["English"]
+        )
+        resolved_exclude = (
+            exclude_quality
+            if exclude_quality is not None
+            else ["CAM", "TS", "SCR", "R5", "R6"]
+        )
         result: StreamResolution = await _composer(
             title=title,
             content_type=content_type,
             season=season,
             episode=episode,
-            preferred_languages=preferred_languages or ["English"],
-            exclude_quality=exclude_quality or ["CAM", "TS", "SCR", "R5", "R6"],
+            preferred_languages=resolved_languages,
+            exclude_quality=resolved_exclude,
             require_cached=require_cached,
             fallback_to_uncached=fallback_to_uncached,
             aiostreams_addon_url=aiostreams_addon_url,
