@@ -23,9 +23,25 @@ from maestro.realdebrid.filter_gate import FilterGateLearner
 class RDToolset:
     """Encapsulates the RD client + filter-gate learner for the MCP tools.
 
-    The toolset holds shared state (the client's connection pool and the
-    learner's in-memory keyword evidence) so each tool method can be
-    registered as a closure over a single instance.
+    The toolset holds shared state (the client's connection pool and
+    the learner's in-memory keyword evidence) so each tool method can
+    be registered as a closure over a single instance. Single-instance-
+    per-server-lifetime by design -- FastMCP serializes tool
+    invocations within a session, so no thread-safety or coroutine-
+    safety is asserted.
+
+    Shared-state contract:
+
+    - The :class:`RDClient` instance owns the bearer-token-bound httpx
+      connection pool. All tool methods that hit RD go through this
+      one client.
+    - The :class:`.filter_gate.FilterGateLearner` instance owns the
+      in-memory ``learned_keywords`` dict + the state-file path. The
+      learner is read by :meth:`check_cache` (risk overlay) and
+      :meth:`filter_gate_check` (pure-compute); writes happen via
+      future composer integration (Phase 7 ``find_best_stream``) when
+      :meth:`unrestrict_link` returns an ``infringing_file`` 403 --
+      see :class:`.filter_gate.FilterGateLearner.record_strike_and_persist`.
     """
 
     def __init__(
@@ -119,9 +135,37 @@ class RDToolset:
 def register_tools(mcp: FastMCP, settings: MaestroSettings) -> RDToolset:
     """Register all 7 RD tools on the FastMCP app.
 
-    Returns the toolset so a future composer (Phase 7's
-    ``find_best_stream``) can share the same client + learner instances
-    without re-instantiating them.
+    Constructs a single :class:`FilterGateLearner` (loaded from the
+    persisted state file at ``settings.filter_gate_state_path``) and a
+    single :class:`RDToolset` (wrapping :class:`RDClient` + the
+    learner) per server lifetime. The toolset is returned so a
+    downstream composer (Phase 7 ``find_best_stream``) can wire to the
+    SAME client + learner instances rather than re-instantiating --
+    avoiding a duplicate connection pool and, more importantly,
+    duplicate in-memory ``learned_keywords`` state that would diverge
+    on subsequent strikes.
+
+    Annotation strategy: 5 tools are marked ``read_only`` (idempotent
+    queries, no side effects beyond logging), 1 is marked
+    ``pure_compute`` (``filter_gate_check`` -- no network, no
+    in-memory mutation, just a regex match against the learner's
+    current keyword set), and 2 are marked ``destructive``
+    (``add_torrent`` enqueues an RD operation, ``unrestrict_link``
+    burns daily-cap quota and may trigger filter-gate strike learning
+    via the future composer wiring).
+
+    Secret handling: ``settings.rd_token`` is unwrapped via
+    ``.get_secret_value()`` exactly here, then passed to the client
+    as a plain string for the lifetime of the process. Pydantic v2's
+    ``SecretStr.__eq__`` does not compare against plain strings; the
+    project tracks this as one of the hard invariants in CLAUDE.md.
+
+    Filter-gate state lifecycle: ``learner.load_state()`` runs once at
+    registration. Subsequent writes happen lazily on each
+    ``record_strike_and_persist`` call from the composer. If
+    ``filter_gate_state_path`` is ``None`` (test wiring), the learner
+    operates in memory-only mode and persistence calls are silent
+    no-ops.
     """
     learner = FilterGateLearner(state_path=settings.filter_gate_state_path)
     learner.load_state()
