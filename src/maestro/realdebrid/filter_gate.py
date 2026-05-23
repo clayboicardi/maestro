@@ -225,10 +225,11 @@ class FilterGateLearner:
     ) -> list[str]:
         """Convenience: ``record_strike`` then ``save_state`` in one call.
 
-        Use this from production callers (Phase 7 composer onward) to avoid
-        silent state loss when only the strike half of the pair is wired
-        up. ``save_state`` is a no-op when ``state_path`` is None, so this
-        is safe for both production and test wiring.
+        Use this from production callers (the future composer that owns
+        post-403 strike learning) to avoid silent state loss when only the
+        strike half of the pair is wired up. ``save_state`` is a no-op
+        when ``state_path`` is None, so this is safe for both production
+        and test wiring.
 
         Persistence semantics: persists whenever the underlying
         ``record_strike`` could have mutated state (i.e., ``rd_error_code
@@ -315,7 +316,7 @@ class FilterGateLearner:
 
         Returns ``{"known_keywords": <sorted_list>, "learned_keywords":
         {<keyword>: {<LearnEvidence>}}}``. Intended for diagnostic /
-        introspection tools (Phase 6 diagnostics suite) -- NOT used by
+        introspection tools -- NOT used by
         :meth:`save_state` (which writes only the ``learned_keywords``
         slice, since ``KNOWN_KEYWORDS`` is a static constant). Pure
         read; no I/O.

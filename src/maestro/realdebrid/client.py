@@ -134,7 +134,7 @@ class RDClient:
         request lazily reinitializes the client (with the same bearer
         token + timeout from construction).
 
-        Known trade-off (CF11): the stdio-MCP server does not call this
+        Known trade-off: the stdio-MCP server does not call this
         on shutdown -- process exit reclaims sockets, and FastMCP's
         lifespan hooks do not currently expose a clean teardown signal
         for per-domain clients. Revisit if maestro migrates to a

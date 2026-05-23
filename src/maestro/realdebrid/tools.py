@@ -39,7 +39,7 @@ class RDToolset:
       in-memory ``learned_keywords`` dict + the state-file path. The
       learner is read by :meth:`check_cache` (risk overlay) and
       :meth:`filter_gate_check` (pure-compute); writes happen via
-      future composer integration (Phase 7 ``find_best_stream``) when
+      future composer integration (``find_best_stream``) when
       :meth:`unrestrict_link` returns an ``infringing_file`` 403 --
       see :class:`.filter_gate.FilterGateLearner.record_strike_and_persist`.
     """
@@ -123,7 +123,7 @@ class RDToolset:
         via the middleware -- a future ``find_best_stream`` composer
         will catch that shape and feed it back to
         :meth:`FilterGateLearner.record_strike` to grow the learned
-        keyword set (Phase 7).
+        keyword set.
         """
         return await self._client.unrestrict_link(restricted_url)
 
@@ -139,7 +139,7 @@ def register_tools(mcp: FastMCP, settings: MaestroSettings) -> RDToolset:
     persisted state file at ``settings.filter_gate_state_path``) and a
     single :class:`RDToolset` (wrapping :class:`RDClient` + the
     learner) per server lifetime. The toolset is returned so a
-    downstream composer (Phase 7 ``find_best_stream``) can wire to the
+    downstream composer (``find_best_stream``) can wire to the
     SAME client + learner instances rather than re-instantiating --
     avoiding a duplicate connection pool and, more importantly,
     duplicate in-memory ``learned_keywords`` state that would diverge
@@ -160,7 +160,7 @@ def register_tools(mcp: FastMCP, settings: MaestroSettings) -> RDToolset:
     ``.get_secret_value()`` exactly here, then passed to the client
     as a plain string for the lifetime of the process. Pydantic v2's
     ``SecretStr.__eq__`` does not compare against plain strings; the
-    project tracks this as one of the hard invariants in CLAUDE.md.
+    project tracks this as a hard invariant.
 
     Filter-gate state lifecycle: ``learner.load_state()`` runs once at
     registration. Subsequent writes happen lazily on each
