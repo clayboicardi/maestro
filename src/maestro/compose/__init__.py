@@ -1,15 +1,25 @@
-"""Compose domain -- `find_best_stream` killer feature.
+"""Compose domain -- the ``find_best_stream`` killer feature surface.
 
-Wires the parameterized :func:`maestro.compose.find_best_stream.find_best_stream`
-composer to the FastMCP server with sub-domain callables threaded in from
-Phase 5 (RD) and Phase 6 (Stremio) toolsets.
+Wires the parameterized
+:func:`maestro.compose.find_best_stream.find_best_stream` composer to
+the FastMCP server with sub-domain callables threaded in from the RD
+and Stremio toolsets. The composer itself is sub-domain agnostic (takes
+callables) so it stays unit-testable without an MCP server or live
+upstream endpoints.
 
-The composer itself is sub-domain agnostic (takes callables) so it stays
-unit-testable without an MCP server. This module is the only place that
-reaches into Phase 5/6 toolset internals -- the cross-domain wiring needs
-the underlying ``_client`` / ``_learner`` references that the toolsets
-encapsulate. Documented and isolated here so future maintainers don't
-duplicate the private-attribute access elsewhere.
+This module is the ONLY place that reaches into RD + Stremio toolset
+internals (``rd_toolset._client``, ``rd_toolset._learner``,
+``stremio_toolset._client``). The cross-domain wiring needs the
+underlying client + learner references; the per-domain toolsets don't
+expose public accessors because no other consumer needed them. Promoting
+those private refs to public attributes would force per-domain file
+changes for one downstream consumer (this composer); keeping the private
+access LOCALIZED HERE is the smaller-blast-radius option, and the
+violation is documented + intentional rather than incidental.
+
+Surfaces a single MCP tool: ``find_best_stream``, annotated as
+``destructive`` because it can burn Real-Debrid daily-cap quota and
+trigger filter-gate strike learning as a side effect.
 """
 
 from __future__ import annotations
@@ -37,20 +47,30 @@ def register_tools(
 ) -> None:
     """Register ``find_best_stream`` wired to RD + Stremio sub-domains.
 
-    The composer is parameterized over callables -- this function binds
+    The composer is parameterized over callables; this function binds
     each callable to the relevant toolset method so the registered tool
-    captures both:
+    captures the SHARED state across calls:
 
-    1. The shared :class:`RDClient` (reused connection pool) via
-       ``rd_toolset._client``.
-    2. The shared :class:`FilterGateLearner` (in-memory keyword evidence
-       persists across calls) via ``rd_toolset._learner``.
+    1. ``stremio_toolset._client.cinemeta_search`` -- title -> IMDB id.
+    2. ``stremio_toolset.query_addon`` -- AIOStreams stream query.
+    3. ``rd_toolset._client.check_cache`` -- the SHARED RD client with
+       its already-bound bearer token and reused httpx connection pool.
+    4. ``rd_toolset._client.unrestrict_link`` -- same shared client.
+    5. ``learner`` -- the SHARED :class:`FilterGateLearner`; in-memory
+       keyword evidence persists across composer calls AND is the same
+       instance the RD ``filter_gate_check`` tool reads from. Sharing
+       it here ensures strikes the composer records via
+       :meth:`record_strike_and_persist` are immediately visible to
+       the standalone risk-check tool.
 
-    Private-attribute access at the toolset boundary is deliberate: the
-    cross-domain wiring needs the underlying client/learner refs and the
-    toolsets don't expose public accessors. Promoting these to public
-    would force Phase 5/6 file changes for one consumer; keeping the
-    private access localized here is the smaller-blast-radius option.
+    Private-attribute access at the toolset boundary
+    (``rd_toolset._client``, ``stremio_toolset._client``) is deliberate
+    and load-bearing -- see the package-level docstring for rationale.
+    Promoting those refs to public attributes would force changes in
+    the per-domain modules for this single cross-domain consumer.
+
+    The ``compose_budget_s`` argument becomes the composer's wall-clock
+    budget; tunable per deployment via the same name on settings.
     """
 
     async def find_best_stream_tool(
@@ -65,16 +85,28 @@ def register_tools(
     ) -> dict[str, Any]:
         """Resolve a title to a single playable Real-Debrid URL.
 
-        Chains AIOStreams (already configured by user) + RD cache check +
-        May 2026 filter-gate heuristic + retry-on-fail.
+        Chains the user-configured AIOStreams addon + Real-Debrid cache
+        check + the May 2026 filter-gate runtime heuristic + retry-on-
+        fail. See :func:`maestro.compose.find_best_stream.find_best_stream`
+        for the full 7-step chain documentation and parameter contract
+        (including the ``fallback_to_uncached`` double-duty behavior).
 
-        Returns either a successful :class:`StreamResolution` with ``url``
-        set, or a structured failure with ``attempts`` showing per-candidate
-        diagnostics and ``suggestion`` recommending next action.
+        Defaulting policy applied here (before delegating to the
+        composer):
+
+        - ``preferred_languages`` defaults to ``["English"]`` -- the
+          consumer can pass an explicit list to override.
+        - ``exclude_quality`` defaults to ``["CAM", "TS", "SCR", "R5",
+          "R6"]`` -- common low-quality release types most consumers
+          want filtered.
+
+        Returns the dict-serialized :class:`StreamResolution`. Inspect
+        ``url`` (truthy iff success) and ``attempts`` (per-candidate
+        diagnostics on failure).
         """
-        # Cross-domain composition needs the underlying client/learner; toolset has no
-        # public accessor by design (Phase 5/6 didn't anticipate the Phase 7 consumer).
-        # Documented and isolated to this single call site.
+        # Cross-domain composition needs the underlying client/learner refs;
+        # the per-domain toolsets don't expose public accessors. Documented
+        # and isolated to this single call site -- see package docstring.
         result: StreamResolution = await _composer(
             title=title,
             content_type=content_type,
