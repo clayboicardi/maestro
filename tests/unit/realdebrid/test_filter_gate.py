@@ -163,9 +163,7 @@ def test_load_state_recovers_from_schema_mismatch(tmp_path: Path) -> None:
     re-populates from future strikes.
     """
     state_path = tmp_path / "state.json"
-    state_path.write_text(
-        json.dumps({"learned_keywords": {"KW": {"count": "not-an-int"}}})
-    )
+    state_path.write_text(json.dumps({"learned_keywords": {"KW": {"count": "not-an-int"}}}))
     learner = FilterGateLearner(state_path=state_path)
     learner.load_state()  # must not raise
     assert learner.learned_keywords == {}

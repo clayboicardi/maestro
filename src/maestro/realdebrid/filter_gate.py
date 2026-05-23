@@ -327,9 +327,7 @@ class FilterGateLearner:
         try:
             data = json.loads(self.state_path.read_text(encoding="utf-8"))
             raw = data.get("learned_keywords", {})
-            self.learned_keywords = {
-                k: LearnEvidence.model_validate(v) for k, v in raw.items()
-            }
+            self.learned_keywords = {k: LearnEvidence.model_validate(v) for k, v in raw.items()}
         except json.JSONDecodeError:
             log.warning("filter_gate_state_corrupt", path=str(self.state_path))
         except (ValidationError, AttributeError) as e:
