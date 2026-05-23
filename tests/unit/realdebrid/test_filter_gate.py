@@ -194,6 +194,23 @@ def test_load_state_recovers_from_schema_mismatch(tmp_path: Path) -> None:
     assert learner.learned_keywords == {}
 
 
+def test_load_state_recovers_from_non_utf8_bytes(tmp_path: Path) -> None:
+    """FF-2 regression: load_state must not raise on non-UTF-8 bytes.
+
+    S-4 added encoding="utf-8" to read_text, which introduced a
+    UnicodeDecodeError failure mode that fires BEFORE the JSONDecodeError
+    branch can catch it. Without explicit handling, the M-3 "never raises
+    on bad state" contract would be defeated for non-UTF-8 corruption
+    -- and register_tools calls load_state at startup, so server boot
+    would crash.
+    """
+    state_path = tmp_path / "state.json"
+    state_path.write_bytes(b"\xff\xfe\x00\x00not-valid-utf8")
+    learner = FilterGateLearner(state_path=state_path)
+    learner.load_state()  # must not raise
+    assert learner.learned_keywords == {}
+
+
 def test_load_state_recovers_from_non_dict_root(tmp_path: Path) -> None:
     """load_state must not raise on a non-dict JSON root -- recovery is silent.
 

@@ -314,9 +314,9 @@ class FilterGateLearner:
         ``learned_keywords`` as initialized -- empty -- so the learner
         re-populates from future :meth:`record_strike` calls):
 
-        - **Corrupt JSON** (``json.JSONDecodeError``): logs
-          ``filter_gate_state_corrupt``. Next :meth:`save_state`
-          overwrites the corrupt file.
+        - **Corrupt JSON or non-UTF-8 bytes** (``json.JSONDecodeError``,
+          ``UnicodeDecodeError``): logs ``filter_gate_state_corrupt``.
+          Next :meth:`save_state` overwrites the corrupt file.
         - **Schema mismatch** (``pydantic.ValidationError``): logs
           ``filter_gate_state_schema_mismatch``. Fires when a future
           maestro version adds a required ``LearnEvidence`` field that
@@ -338,7 +338,7 @@ class FilterGateLearner:
             data = json.loads(self.state_path.read_text(encoding="utf-8"))
             raw = data.get("learned_keywords", {})
             self.learned_keywords = {k: LearnEvidence.model_validate(v) for k, v in raw.items()}
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, UnicodeDecodeError):
             log.warning("filter_gate_state_corrupt", path=str(self.state_path))
         except (ValidationError, AttributeError) as e:
             log.warning(
