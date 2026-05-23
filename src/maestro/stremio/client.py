@@ -17,18 +17,30 @@ URL normalization policy:
   URLs (``https://addon.example/manifest.json``) are accepted on input
   and normalized to the bare base form at the boundary via
   :func:`normalize_addon_base_url`. The bare base is used for path
-  composition in ``query_stream``; ``get_manifest`` re-appends
-  ``/manifest.json`` after normalization. Addon URLs are never stored
-  with the ``/manifest.json`` suffix internally.
+  composition via :func:`_compose_addon_url` in ``query_stream`` and
+  ``get_manifest``. Addon URLs are never stored with the
+  ``/manifest.json`` suffix internally.
+
+  Query strings on the input URL (e.g., authenticated manifest URLs
+  like ``...manifest.json?token=X``) are PRESERVED through both the
+  normalization and path-composition steps via ``urlparse`` /
+  ``urlunparse``. The auth-token query stays attached to the netloc
+  across all derived URLs, so an addon configured with
+  ``https://x/manifest.json?token=X`` will correctly produce
+  ``https://x/stream/movie/tt9.json?token=X`` for stream queries
+  rather than the malformed concatenation prior versions produced.
+
+  Secret-leak hardening: log calls use ``parsed.hostname`` (not
+  ``parsed.netloc``) to strip any ``user:pass@`` userinfo, and
+  exception messages use :func:`_sanitize_url_for_message` to drop
+  query strings + userinfo + fragment from the surfaced URL.
+  Path-segment auth (some addons embed ``/<key>/manifest.json``)
+  remains a documented surface; addon-specific path redaction is not
+  in scope for the generic client.
 
   ``normalize_addon_base_url`` is package-public: the diagnose domain's
   ``stack_health`` probe needs the same normalization, so the function
-  is exposed rather than duplicated. The normalizer only handles the
-  ``/manifest.json`` suffix and trailing slashes -- query strings on
-  the input URL (e.g., ``...manifest.json?token=X``) are NOT recognized
-  as separable suffixes and will leak into the bare base, then
-  re-appear in derived paths. Callers shipping query-stringed manifest
-  URLs should strip the query first.
+  is exposed rather than duplicated.
 
 Retry / timeout policy:
 
