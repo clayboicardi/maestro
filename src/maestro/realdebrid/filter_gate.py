@@ -230,11 +230,20 @@ class FilterGateLearner:
         up. ``save_state`` is a no-op when ``state_path`` is None, so this
         is safe for both production and test wiring.
 
+        Persistence semantics: persists whenever the underlying
+        ``record_strike`` could have mutated state (i.e., ``rd_error_code
+        == "infringing_file"``), regardless of whether a NEW keyword was
+        promoted or an existing keyword's count was incremented. This
+        matters for :data:`LEARNED_PROMOTION_THRESHOLD` transitions: a
+        count-2 keyword that just became active in memory would otherwise
+        regress to count-1 (below threshold, LOW-risk) on process restart,
+        making the runtime-learning loop volatile across restarts.
+
         Returns the same value as ``record_strike`` -- the list of newly
         promoted keywords -- so callers can still log the diagnostics.
         """
         promoted = self.record_strike(filename, rd_error_code)
-        if promoted:
+        if rd_error_code == "infringing_file":
             self.save_state()
         return promoted
 

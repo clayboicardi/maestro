@@ -131,6 +131,29 @@ def test_record_strike_and_persist_skips_save_when_no_promotion(tmp_path: Path) 
     assert not state_path.exists()  # no I/O when nothing was promoted
 
 
+def test_record_strike_and_persist_persists_count_increments(tmp_path: Path) -> None:
+    """Regression: count increments on existing keywords must persist across restarts.
+
+    Pre-fix behavior persisted only when a NEW keyword was promoted, so the
+    second strike (which crosses ``LEARNED_PROMOTION_THRESHOLD``) did not reach
+    disk. Process restart loaded count=1, dropping the keyword back below
+    threshold and making the runtime-learning loop volatile across restarts.
+    """
+    state_path = tmp_path / "state.json"
+    learner = FilterGateLearner(state_path=state_path)
+
+    learner.record_strike_and_persist("a.REGRESSKW.mkv", "infringing_file")
+    learner.record_strike_and_persist("b.REGRESSKW.mkv", "infringing_file")
+
+    assert learner.learned_keywords["REGRESSKW"].count == 2
+    assert learner.predict_risk("c.REGRESSKW.mkv") == RiskLevel.HIGH
+
+    restarted = FilterGateLearner(state_path=state_path)
+    restarted.load_state()
+    assert restarted.learned_keywords["REGRESSKW"].count == 2
+    assert restarted.predict_risk("c.REGRESSKW.mkv") == RiskLevel.HIGH
+
+
 def test_export_state_includes_known_and_learned() -> None:
     """export_state surfaces both the static baseline and runtime-learned keywords."""
     learner = FilterGateLearner()
