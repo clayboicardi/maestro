@@ -410,3 +410,92 @@ async def test_exclude_quality_filters_out_matching_streams(
     assert result.ok
     # Only the BluRay stream should have reached unrestrict; CAM was filtered.
     rd_unrestrict.assert_called_once_with("https://r/bluray")
+
+
+@pytest.mark.asyncio
+async def test_language_filter_no_longer_false_positives_on_english_words(
+    learner: FilterGateLearner,
+) -> None:
+    """S-4 regression: titles with words containing former 3-letter LANG_TOKENS pass through.
+
+    Pre-fix bug: _LANG_TOKENS contained 'fre'/'ita'/'rus'/'hin' which substring-matched
+    English words like 'Free'/'Capital'/'Crusher'/'Shine'. Those streams got silently
+    dropped despite being preferred-language candidates. Also dropped MULTI/Dual
+    (audio-multiplicity markers that almost always include English).
+
+    Post-fix: only full-word language names in _LANG_TOKENS.
+    """
+    cinemeta_search = AsyncMock(return_value="tt9")
+    stremio_query = AsyncMock(
+        return_value=[
+            {"infoHash": "h1", "title": "Show.Free.Lossless.1080p.mkv", "url": "https://r/1"},
+            {"infoHash": "h2", "title": "Capital.Letter.Show.1080p.mkv", "url": "https://r/2"},
+            {"infoHash": "h3", "title": "Show.MULTI.LANG.1080p.mkv", "url": "https://r/3"},
+            {"infoHash": "h4", "title": "Show.Dual.Audio.1080p.mkv", "url": "https://r/4"},
+        ]
+    )
+    rd_check_cache = AsyncMock(
+        return_value={"h1": {"cached": True}, "h2": {"cached": True}, "h3": {"cached": True}, "h4": {"cached": True}}
+    )
+    rd_unrestrict = AsyncMock(return_value={"download": "https://rd.example/cdn/x.mkv"})
+
+    result = await find_best_stream(
+        title="x",
+        content_type="movie",
+        season=None,
+        episode=None,
+        preferred_languages=["English"],
+        exclude_quality=[],
+        require_cached=True,
+        fallback_to_uncached=False,
+        aiostreams_addon_url="https://x",
+        learner=learner,
+        cinemeta_search=cinemeta_search,
+        stremio_query=stremio_query,
+        rd_check_cache=rd_check_cache,
+        rd_unrestrict=rd_unrestrict,
+        budget_s=60.0,
+    )
+    assert result.ok
+    # First candidate (Free Lossless) should reach unrestrict; others would too
+    # but the composer returns on first success.
+    rd_unrestrict.assert_called_once_with("https://r/1")
+
+
+@pytest.mark.asyncio
+async def test_language_filter_still_drops_explicit_foreign_tag(
+    learner: FilterGateLearner,
+) -> None:
+    """S-4 regression: full-word language tokens like 'french' still drop foreign releases."""
+    cinemeta_search = AsyncMock(return_value="tt9")
+    stremio_query = AsyncMock(
+        return_value=[
+            {"infoHash": "h1", "title": "Show.French.1080p.mkv", "url": "https://r/fr"},
+            {"infoHash": "h2", "title": "Show.English.1080p.mkv", "url": "https://r/en"},
+        ]
+    )
+    rd_check_cache = AsyncMock(
+        return_value={"h1": {"cached": True}, "h2": {"cached": True}}
+    )
+    rd_unrestrict = AsyncMock(return_value={"download": "https://rd.example/cdn/x.mkv"})
+
+    result = await find_best_stream(
+        title="x",
+        content_type="movie",
+        season=None,
+        episode=None,
+        preferred_languages=["English"],
+        exclude_quality=[],
+        require_cached=True,
+        fallback_to_uncached=False,
+        aiostreams_addon_url="https://x",
+        learner=learner,
+        cinemeta_search=cinemeta_search,
+        stremio_query=stremio_query,
+        rd_check_cache=rd_check_cache,
+        rd_unrestrict=rd_unrestrict,
+        budget_s=60.0,
+    )
+    assert result.ok
+    # French stream dropped (full-word match); English stream attempted.
+    rd_unrestrict.assert_called_once_with("https://r/en")

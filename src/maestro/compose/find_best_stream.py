@@ -74,6 +74,17 @@ RDUnrestrict = Callable[[str], Awaitable[dict[str, Any]]]
 # Language-tag tokens commonly seen in release names. Used so we can
 # distinguish "stream tags a language we don't want" (reject) from
 # "stream tags no language at all" (accept -- usually English by default).
+#
+# Full-word tokens ONLY (no 3-letter codes). Prior versions included
+# "fre"/"spa"/"ger"/"ita"/"por"/"rus"/"jpn"/"kor"/"chi"/"hin", but
+# plain substring matching against title text caused false-positive
+# drops on English words like "Free" / "Frequency" / "Capital" /
+# "Crusher" / "Shine". Also dropped: "multi" and "dual" -- those are
+# AUDIO-multiplicity markers (almost always include English), not
+# single foreign-language tags. A future improvement could
+# reintroduce the 3-letter codes via word-boundary regex matching
+# (e.g., r"\b(fre|spa|ger|...)\b") to catch bracketed `[FRE]` tags
+# without snagging "Free"; out of scope for v1.
 _LANG_TOKENS: tuple[str, ...] = (
     "english",
     "french",
@@ -87,18 +98,6 @@ _LANG_TOKENS: tuple[str, ...] = (
     "chinese",
     "hindi",
     "dubbed",
-    "multi",
-    "dual",
-    "fre",
-    "spa",
-    "ger",
-    "ita",
-    "por",
-    "rus",
-    "jpn",
-    "kor",
-    "chi",
-    "hin",
 )
 
 # Media-file extensions used to identify the real-filename line inside a
