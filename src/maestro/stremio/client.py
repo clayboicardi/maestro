@@ -101,6 +101,29 @@ def _compose_addon_url(base: str, path: str) -> str:
     return urlunparse(parsed._replace(path=full_path))
 
 
+def _sanitize_url_for_message(url: str) -> str:
+    """Strip userinfo + query + fragment from a URL for safe inclusion in error messages.
+
+    Returns ``"<scheme>://<hostname><path>"``. Used in
+    :class:`MaestroException` messages so a URL like
+    ``"https://example.com/manifest.json?token=secret"`` surfaces as
+    ``"https://example.com/manifest.json"`` in error responses --
+    actionable for debugging without leaking auth credentials through
+    MCP middleware's exception logging path.
+
+    Falls back to the original URL if parsing fails (defensive: better
+    to surface a malformed URL than to mask the underlying error
+    behind a stripping bug).
+    """
+    try:
+        parsed = urlparse(url)
+        host = parsed.hostname or parsed.netloc
+        scheme = parsed.scheme or "https"
+        return f"{scheme}://{host}{parsed.path}"
+    except (ValueError, AttributeError):
+        return url
+
+
 class StremioAddonClient:
     """Reusable HTTP client for any Stremio addon URL.
 
@@ -142,21 +165,23 @@ class StremioAddonClient:
         url = _compose_addon_url(base, "/manifest.json")
         parsed = urlparse(url)
         # Use hostname (not netloc) so any user:pass@ userinfo is stripped before logging.
-        log.info(
-            "stremio_get_manifest_request", host=parsed.hostname, path=parsed.path
-        )
+        log.info("stremio_get_manifest_request", host=parsed.hostname, path=parsed.path)
         try:
             async with httpx.AsyncClient(timeout=self._timeout_s) as client:
                 response = await client.get(url, follow_redirects=True)
                 response.raise_for_status()
                 return response.json()
         except httpx.TimeoutException as e:
-            raise MaestroException(AddonTimeout(message=f"manifest timeout: {addon_url}")) from e
+            raise MaestroException(
+                AddonTimeout(message=f"manifest timeout: {_sanitize_url_for_message(addon_url)}")
+            ) from e
         except httpx.HTTPError as e:
             raise MaestroException(AddonMalformed(message=f"manifest HTTP error: {e}")) from e
         except ValueError as e:
             raise MaestroException(
-                AddonMalformed(message=f"manifest malformed JSON from {url}")
+                AddonMalformed(
+                    message=f"manifest malformed JSON from {_sanitize_url_for_message(url)}"
+                )
             ) from e
 
     async def query_stream(
@@ -213,21 +238,26 @@ class StremioAddonClient:
                 response.raise_for_status()
                 payload = response.json()
         except httpx.TimeoutException as e:
-            raise MaestroException(AddonTimeout(message=f"stream query timeout: {url}")) from e
+            raise MaestroException(
+                AddonTimeout(message=f"stream query timeout: {_sanitize_url_for_message(url)}")
+            ) from e
         except httpx.HTTPError as e:
             raise MaestroException(AddonMalformed(message=f"stream HTTP error: {e}")) from e
         except ValueError as e:
             raise MaestroException(
-                AddonMalformed(message=f"stream malformed JSON from {url}")
+                AddonMalformed(
+                    message=f"stream malformed JSON from {_sanitize_url_for_message(url)}"
+                )
             ) from e
 
+        safe_url = _sanitize_url_for_message(url)
         if not isinstance(payload, dict):
             raise MaestroException(
-                AddonMalformed(message=f"stream response root is not a dict from {url}")
+                AddonMalformed(message=f"stream response root is not a dict from {safe_url}")
             )
         streams = payload.get("streams", [])
         if not isinstance(streams, list):
-            raise MaestroException(AddonMalformed(message=f"streams is not a list in {url}"))
+            raise MaestroException(AddonMalformed(message=f"streams is not a list in {safe_url}"))
         return streams
 
     async def cinemeta_search(

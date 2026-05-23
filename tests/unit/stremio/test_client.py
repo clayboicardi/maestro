@@ -26,13 +26,11 @@ def test_normalize_addon_base_url_preserves_query_string() -> None:
     assert normalize_addon_base_url("https://addon.example") == "https://addon.example"
     # Manifest-suffixed without query
     assert (
-        normalize_addon_base_url("https://addon.example/manifest.json")
-        == "https://addon.example"
+        normalize_addon_base_url("https://addon.example/manifest.json") == "https://addon.example"
     )
     # Trailing slash + manifest + trailing slash
     assert (
-        normalize_addon_base_url("https://addon.example/manifest.json/")
-        == "https://addon.example"
+        normalize_addon_base_url("https://addon.example/manifest.json/") == "https://addon.example"
     )
 
 
@@ -161,6 +159,33 @@ async def test_cinemeta_search_returns_none_on_non_dict_root(client: StremioAddo
 
     imdb_id = await client.cinemeta_search(title="Whatever", content_type="series")
     assert imdb_id is None  # must not raise
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_query_stream_error_message_strips_query_string(
+    client: StremioAddonClient,
+) -> None:
+    """FF-1 regression: exception messages must not leak query-string secrets.
+
+    Pre-fix: MaestroException(AddonMalformed(message=f"... from {url}")) embedded
+    the full URL including ?token=secret in the error path. MCP middleware logs
+    exceptions, recreating the secret-leak surface S-2 closed for log.info calls.
+    Now sanitized via _sanitize_url_for_message which drops query/fragment/userinfo.
+    """
+    respx.get("https://example.com/stream/movie/tt9.json").mock(
+        return_value=httpx.Response(200, json=["not", "a", "dict"])
+    )
+    with pytest.raises(MaestroException) as exc_info:
+        await client.query_stream(
+            addon_url="https://example.com/manifest.json?token=secret",
+            content_type="movie",
+            imdb_id="tt9",
+        )
+    msg = exc_info.value.error.message
+    assert "secret" not in msg, f"exception message leaked secret: {msg}"
+    assert "token" not in msg, f"exception message leaked token: {msg}"
+    assert "example.com" in msg  # host still surfaced for debugging
 
 
 @respx.mock
