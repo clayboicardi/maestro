@@ -435,7 +435,12 @@ async def test_language_filter_no_longer_false_positives_on_english_words(
         ]
     )
     rd_check_cache = AsyncMock(
-        return_value={"h1": {"cached": True}, "h2": {"cached": True}, "h3": {"cached": True}, "h4": {"cached": True}}
+        return_value={
+            "h1": {"cached": True},
+            "h2": {"cached": True},
+            "h3": {"cached": True},
+            "h4": {"cached": True},
+        }
     )
     rd_unrestrict = AsyncMock(return_value={"download": "https://rd.example/cdn/x.mkv"})
 
@@ -474,9 +479,7 @@ async def test_language_filter_still_drops_explicit_foreign_tag(
             {"infoHash": "h2", "title": "Show.English.1080p.mkv", "url": "https://r/en"},
         ]
     )
-    rd_check_cache = AsyncMock(
-        return_value={"h1": {"cached": True}, "h2": {"cached": True}}
-    )
+    rd_check_cache = AsyncMock(return_value={"h1": {"cached": True}, "h2": {"cached": True}})
     rd_unrestrict = AsyncMock(return_value={"download": "https://rd.example/cdn/x.mkv"})
 
     result = await find_best_stream(

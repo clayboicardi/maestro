@@ -111,12 +111,8 @@ async def test_cinemeta_search_escapes_slash_in_title(client: StremioAddonClient
     '.../search=Face/Off.json' which Cinemeta would 404 (and worse, could be
     interpreted as a different path segment). Fix: quote(title, safe='').
     """
-    respx.get(
-        "https://v3-cinemeta.strem.io/catalog/movie/top/search=Face%2FOff.json"
-    ).mock(
-        return_value=httpx.Response(
-            200, json={"metas": [{"id": "tt0119094", "name": "Face/Off"}]}
-        )
+    respx.get("https://v3-cinemeta.strem.io/catalog/movie/top/search=Face%2FOff.json").mock(
+        return_value=httpx.Response(200, json={"metas": [{"id": "tt0119094", "name": "Face/Off"}]})
     )
     imdb_id = await client.cinemeta_search(title="Face/Off", content_type="movie")
     assert imdb_id == "tt0119094"
@@ -131,9 +127,9 @@ async def test_cinemeta_search_returns_none_on_non_dict_root(client: StremioAddo
     was a list/string/number, breaking the "never raises" contract documented in
     the cinemeta_search docstring.
     """
-    respx.get(
-        "https://v3-cinemeta.strem.io/catalog/series/top/search=Whatever.json"
-    ).mock(return_value=httpx.Response(200, json=["not", "a", "dict"]))
+    respx.get("https://v3-cinemeta.strem.io/catalog/series/top/search=Whatever.json").mock(
+        return_value=httpx.Response(200, json=["not", "a", "dict"])
+    )
 
     imdb_id = await client.cinemeta_search(title="Whatever", content_type="series")
     assert imdb_id is None  # must not raise

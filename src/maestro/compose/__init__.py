@@ -113,13 +113,9 @@ def register_tools(
         # the per-domain toolsets don't expose public accessors. Documented
         # and isolated to this single call site -- see package docstring.
         # Defaulting uses `is None` to preserve explicit `[]` as "disable filter".
-        resolved_languages = (
-            preferred_languages if preferred_languages is not None else ["English"]
-        )
+        resolved_languages = preferred_languages if preferred_languages is not None else ["English"]
         resolved_exclude = (
-            exclude_quality
-            if exclude_quality is not None
-            else ["CAM", "TS", "SCR", "R5", "R6"]
+            exclude_quality if exclude_quality is not None else ["CAM", "TS", "SCR", "R5", "R6"]
         )
         result: StreamResolution = await _composer(
             title=title,
