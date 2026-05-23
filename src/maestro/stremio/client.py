@@ -48,7 +48,7 @@ Retry / timeout policy:
 from __future__ import annotations
 
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 import httpx
 import structlog
@@ -125,7 +125,8 @@ class StremioAddonClient:
         """
         base = normalize_addon_base_url(addon_url)
         url = f"{base}/manifest.json"
-        log.info("stremio_get_manifest_request", url=url)
+        parsed = urlparse(url)
+        log.info("stremio_get_manifest_request", host=parsed.netloc, path=parsed.path)
         try:
             async with httpx.AsyncClient(timeout=self._timeout_s) as client:
                 response = await client.get(url, follow_redirects=True)
@@ -173,9 +174,11 @@ class StremioAddonClient:
         else:
             path = f"/stream/{content_type}/{imdb_id}.json"
         url = f"{base}{path}"
+        parsed = urlparse(url)
         log.info(
             "stremio_query_stream_request",
-            url=url,
+            host=parsed.netloc,
+            path=parsed.path,
             content_type=content_type,
             imdb_id=imdb_id,
             season=season,
@@ -239,7 +242,7 @@ class StremioAddonClient:
         with the same title), the composer will resolve to the wrong
         ``imdb_id``.
         """
-        encoded = quote(title)
+        encoded = quote(title, safe="")
         url = f"{CINEMETA_BASE}/catalog/{content_type}/top/search={encoded}.json"
         try:
             async with httpx.AsyncClient(timeout=self._timeout_s) as client:

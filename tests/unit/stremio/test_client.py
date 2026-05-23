@@ -104,6 +104,26 @@ async def test_cinemeta_search_resolves_title_to_imdb_id(client: StremioAddonCli
 
 @respx.mock
 @pytest.mark.asyncio
+async def test_cinemeta_search_escapes_slash_in_title(client: StremioAddonClient) -> None:
+    """S-1 regression: titles with '/' must be percent-encoded to %2F in the URL path.
+
+    Pre-fix: quote(title) defaulted to safe='/', so 'Face/Off' generated the path
+    '.../search=Face/Off.json' which Cinemeta would 404 (and worse, could be
+    interpreted as a different path segment). Fix: quote(title, safe='').
+    """
+    respx.get(
+        "https://v3-cinemeta.strem.io/catalog/movie/top/search=Face%2FOff.json"
+    ).mock(
+        return_value=httpx.Response(
+            200, json={"metas": [{"id": "tt0119094", "name": "Face/Off"}]}
+        )
+    )
+    imdb_id = await client.cinemeta_search(title="Face/Off", content_type="movie")
+    assert imdb_id == "tt0119094"
+
+
+@respx.mock
+@pytest.mark.asyncio
 async def test_cinemeta_search_returns_none_on_non_dict_root(client: StremioAddonClient) -> None:
     """M-1 regression: cinemeta_search must return None when JSON root is not a dict.
 
