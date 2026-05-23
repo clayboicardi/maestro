@@ -118,11 +118,14 @@ class FilterGateLearner:
       ``KNOWN_KEYWORDS`` + future strikes if the file is ever
       discarded due to a schema mismatch on a future maestro version.
     - **Concurrency**: single-process, single-writer assumed. No file
-      lock; with N concurrent writers each strike-recording once into
-      the same ``filter_gate_state_path``, N-1 of the strikes are lost
-      (last-writer-wins on ``replace``). Not a concern in stdio-MCP
-      deployment but worth documenting for future HTTP/SSE transport
-      migration.
+      lock and all writers share the same ``<state_path>.tmp`` sibling,
+      so concurrent writers interleave on the ``write_text``/``replace``
+      pair: lost writes (last-writer-wins on ``replace``) in the lucky
+      case, raised ``OSError`` (e.g., ``FileNotFoundError`` when one
+      writer's ``replace`` moves a tmp away before another's
+      ``replace`` runs) in the unlucky case. Not a concern in
+      stdio-MCP deployment but worth documenting for future HTTP/SSE
+      transport migration.
 
     Concurrency within a single process is single-coroutine: FastMCP
     serializes tool invocations per session, and the learner is owned
