@@ -92,28 +92,37 @@ class FilterGateLearner:
       No persistence -- caller must invoke :meth:`save_state`
       explicitly OR use :meth:`record_strike_and_persist` to bundle.
     - :meth:`save_state` writes via atomic-replace (sibling ``.tmp``
-      then ``Path.replace``) to avoid torn writes if the process
-      dies mid-flush. Failure raises -- caller's choice whether to
-      retry or proceed with in-memory state.
+      then ``Path.replace``) to give readers a consistent view;
+      durability is best-effort (no ``fsync``, so power-loss between
+      write and rename can leave a torn or zero-byte ``.tmp`` --
+      recoverable since the next save overwrites it). Failure raises
+      (e.g., ``PermissionError`` on a non-writable parent dir) --
+      caller's choice whether to retry or proceed with in-memory state.
     - :meth:`load_state` is best-effort: corrupt JSON is logged and
       the in-memory state is left as-initialized (empty learned
       keywords). Caller will re-learn from subsequent strikes.
 
     Persistence guarantees:
 
-    - **Atomic write**: yes (via ``Path.replace`` after writing the
-      sibling ``.tmp`` file).
+    - **Atomic for readers**: yes -- ``Path.replace`` is atomic on
+      POSIX and atomic-within-same-volume on Windows, so readers never
+      observe a partially-written state file.
+    - **Durable on power-loss**: NO -- no ``fsync`` before the rename,
+      so a torn or zero-byte ``.tmp`` can survive a power cut between
+      ``write_text`` and ``replace``. The next save overwrites the
+      torn ``.tmp``; the state file itself is untouched until the
+      rename completes.
     - **Schema versioning**: NOT IMPLEMENTED in v1. The on-disk JSON
       shape is ``{"learned_keywords": {<keyword>: {<LearnEvidence>}}}``
       with no version field. State is recoverable from
       ``KNOWN_KEYWORDS`` + future strikes if the file is ever
       discarded due to a schema mismatch on a future maestro version.
-    - **Concurrency**: single-process, single-writer assumed. There
-      is no file lock; concurrent writers from two maestro instances
-      sharing one ``filter_gate_state_path`` would race on the
-      ``.tmp`` file and could lose strikes. Not a concern in
-      stdio-MCP deployment but worth documenting for future HTTP/SSE
-      transport migration.
+    - **Concurrency**: single-process, single-writer assumed. No file
+      lock; with N concurrent writers each strike-recording once into
+      the same ``filter_gate_state_path``, N-1 of the strikes are lost
+      (last-writer-wins on ``replace``). Not a concern in stdio-MCP
+      deployment but worth documenting for future HTTP/SSE transport
+      migration.
 
     Concurrency within a single process is single-coroutine: FastMCP
     serializes tool invocations per session, and the learner is owned
@@ -127,6 +136,12 @@ class FilterGateLearner:
         (``~`` expanded), or ``None`` for memory-only mode. The path
         is normalized once at construction; subsequent ``save_state``/
         ``load_state`` calls reuse the stored value.
+
+        Path validation is deferred to first save: the constructor stores
+        ``state_path`` without checking writability of the parent
+        directory. A first :meth:`save_state` against a read-only parent
+        raises ``PermissionError`` from the implicit
+        ``mkdir(parents=True)`` call.
         """
         self.state_path: Path | None = Path(state_path).expanduser() if state_path else None
         self.learned_keywords: dict[str, LearnEvidence] = {}
@@ -195,6 +210,14 @@ class FilterGateLearner:
         filename that aren't already in ``KNOWN_KEYWORDS``, and records
         evidence for each as a possible new filter-gate keyword.
 
+        Limitation: this regex captures only uppercase tokens. Mixed-case
+        or lowercase tags (e.g., ``WEBRip``, ``[eztv]``) are observable in
+        ``KNOWN_KEYWORDS`` but can NOT be learned from runtime strikes.
+        If future filter-gate keywords ship in non-uppercase form, this
+        regex must be widened (and captures normalized via ``.upper()``
+        to keep the dict-key stable -- :meth:`predict_risk` already
+        matches case-insensitively).
+
         Returns the list of newly-recorded keywords (for caller diagnostics).
         """
         if rd_error_code != "infringing_file":
@@ -249,12 +272,17 @@ class FilterGateLearner:
         return promoted
 
     def save_state(self) -> None:
-        """Persist learned keywords to ``state_path`` via atomic replace.
+        """Persist learned keywords; atomic for readers, best-effort for durability.
 
-        Writes to a sibling ``.tmp`` file then ``os.replace``s to avoid
-        torn writes if the process dies mid-flush. v1 omits schema_version
-        and entry caps -- state is recoverable from KNOWN_KEYWORDS + future
-        strikes if the file is ever discarded.
+        Writes to a sibling file at ``<state_path>.tmp`` (extension-
+        appended, not extension-replaced) then ``Path.replace``s onto
+        ``state_path``. The rename is atomic from a reader's POV
+        (``os.replace``), but the write itself doesn't ``fsync`` --
+        power-loss between ``write_text`` and ``replace`` can leave a
+        torn or zero-byte ``.tmp`` (recoverable: next save overwrites).
+        v1 omits schema_version and entry caps -- state is recoverable
+        from ``KNOWN_KEYWORDS`` + future strikes if the file is ever
+        discarded.
         """
         if self.state_path is None:
             return
@@ -263,7 +291,7 @@ class FilterGateLearner:
             "learned_keywords": {k: v.model_dump() for k, v in self.learned_keywords.items()}
         }
         tmp_path = self.state_path.with_suffix(self.state_path.suffix + ".tmp")
-        tmp_path.write_text(json.dumps(payload, indent=2))
+        tmp_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         tmp_path.replace(self.state_path)
 
     def load_state(self) -> None:
@@ -297,7 +325,7 @@ class FilterGateLearner:
         if self.state_path is None or not self.state_path.exists():
             return
         try:
-            data = json.loads(self.state_path.read_text())
+            data = json.loads(self.state_path.read_text(encoding="utf-8"))
             raw = data.get("learned_keywords", {})
             self.learned_keywords = {
                 k: LearnEvidence.model_validate(v) for k, v in raw.items()
