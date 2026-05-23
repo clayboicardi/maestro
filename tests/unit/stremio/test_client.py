@@ -100,3 +100,43 @@ async def test_cinemeta_search_resolves_title_to_imdb_id(client: StremioAddonCli
 
     imdb_id = await client.cinemeta_search(title="Return to Eden", content_type="series")
     assert imdb_id == "tt12345"
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_cinemeta_search_returns_none_on_non_dict_root(client: StremioAddonClient) -> None:
+    """M-1 regression: cinemeta_search must return None when JSON root is not a dict.
+
+    Pre-fix bug: payload.get("metas") raised AttributeError when the response root
+    was a list/string/number, breaking the "never raises" contract documented in
+    the cinemeta_search docstring.
+    """
+    respx.get(
+        "https://v3-cinemeta.strem.io/catalog/series/top/search=Whatever.json"
+    ).mock(return_value=httpx.Response(200, json=["not", "a", "dict"]))
+
+    imdb_id = await client.cinemeta_search(title="Whatever", content_type="series")
+    assert imdb_id is None  # must not raise
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_query_stream_raises_on_non_dict_root(client: StremioAddonClient) -> None:
+    """M-1 regression: query_stream raises documented MaestroException on non-dict JSON root.
+
+    Pre-fix bug: payload.get("streams", []) raised uncaught AttributeError when the
+    response root was a list. Now wrapped in the documented MaestroException(AddonMalformed)
+    so MCP middleware translates correctly.
+    """
+    respx.get("https://addon.example/stream/movie/tt9999.json").mock(
+        return_value=httpx.Response(200, json=["not", "a", "dict"])
+    )
+
+    with pytest.raises(MaestroException) as exc_info:
+        await client.query_stream(
+            addon_url="https://addon.example",
+            content_type="movie",
+            imdb_id="tt9999",
+        )
+    assert isinstance(exc_info.value.error, AddonMalformed)
+    assert "root is not a dict" in exc_info.value.error.message

@@ -199,6 +199,10 @@ class StremioAddonClient:
                 AddonMalformed(message=f"stream malformed JSON from {url}")
             ) from e
 
+        if not isinstance(payload, dict):
+            raise MaestroException(
+                AddonMalformed(message=f"stream response root is not a dict from {url}")
+            )
         streams = payload.get("streams", [])
         if not isinstance(streams, list):
             raise MaestroException(AddonMalformed(message=f"streams is not a list in {url}"))
@@ -244,6 +248,9 @@ class StremioAddonClient:
                 payload = response.json()
         except (httpx.HTTPError, ValueError):
             log.warning("cinemeta_search_failed", title=title)
+            return None
+        if not isinstance(payload, dict):
+            log.warning("cinemeta_search_failed", title=title, reason="non_dict_root")
             return None
         metas = payload.get("metas") or []
         if not metas:
