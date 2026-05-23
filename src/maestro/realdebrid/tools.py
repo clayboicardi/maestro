@@ -145,14 +145,16 @@ def register_tools(mcp: FastMCP, settings: MaestroSettings) -> RDToolset:
     duplicate in-memory ``learned_keywords`` state that would diverge
     on subsequent strikes.
 
-    Annotation strategy: 5 tools are marked ``read_only`` (idempotent
-    queries, no side effects beyond logging), 1 is marked
-    ``pure_compute`` (``filter_gate_check`` -- no network, no
-    in-memory mutation, just a regex match against the learner's
-    current keyword set), and 2 are marked ``destructive``
-    (``add_torrent`` enqueues an RD operation, ``unrestrict_link``
-    burns daily-cap quota and may trigger filter-gate strike learning
-    via the future composer wiring).
+    Annotation strategy (per-tool, immune to count drift):
+    ``get_user_info``, ``check_cache``, ``get_torrent_status``, and
+    ``get_library`` are ``read_only`` (idempotent queries, no side
+    effects beyond logging); ``filter_gate_check`` is ``pure_compute``
+    (no network, no in-memory mutation, just a regex match against
+    the learner's current keyword set); ``add_torrent`` and
+    ``unrestrict_link`` are ``destructive`` (``add_torrent`` enqueues
+    an RD operation; ``unrestrict_link`` burns daily-cap quota and
+    may trigger filter-gate strike learning via the future composer
+    wiring).
 
     Secret handling: ``settings.rd_token`` is unwrapped via
     ``.get_secret_value()`` exactly here, then passed to the client

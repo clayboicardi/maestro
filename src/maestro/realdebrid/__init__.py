@@ -12,12 +12,13 @@ learning loop. Layered as:
   predicts ``infringing_file`` risk per filename from a static
   ``KNOWN_KEYWORDS`` baseline plus a runtime-learned set persisted to
   ``~/.config/maestro/filter_gate_state.json``.
-- :mod:`.tools` -- :class:`.tools.RDToolset` exposes 5 read-only +
-  1 pure-compute + 1 destructive operation (cache check, library list,
-  user info, torrent status, filter-gate check, add torrent, unrestrict
-  link). The cache-check tool overlays the filter-gate risk heuristic
-  so Claude can avoid burning daily-cap quota on ``infringing_file``
-  403s.
+- :mod:`.tools` -- :class:`.tools.RDToolset` exposes the seven MCP
+  tools enumerated below: four read-only queries (cache check,
+  library list, user info, torrent status), one pure-compute risk
+  heuristic (filter-gate check), and two destructive ops (add
+  torrent, unrestrict link). The cache-check tool overlays the
+  filter-gate risk heuristic so Claude can avoid burning daily-cap
+  quota on ``infringing_file`` 403s.
 - :func:`.tools.register_tools` -- wires the toolset onto a FastMCP app
   and returns the live toolset so a downstream composer (Phase 7
   ``find_best_stream``) can share the client + learner without
