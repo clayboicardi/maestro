@@ -10,8 +10,12 @@ Stremio addon protocol over MCP:
   addon raising :class:`MaestroException` (timeout or malformed JSON)
   is caught and logged at warning level; that addon's slot in the
   result map gets an empty stream list and the remaining addons'
-  results are still returned. The composer downstream inspects empty
-  slots for diagnostics.
+  results are still returned. Note: the v1 ``find_best_stream``
+  composer wires the single-addon ``query_addon`` (one AIOStreams
+  endpoint per call), NOT this parallel variant. The "empty slot
+  diagnostics" semantics are intended for a future multi-addon
+  composer; today's surface uses this tool as a standalone Claude-
+  facing utility for ad-hoc fan-out queries.
 - ``stremio_get_manifest`` -- single addon's ``/manifest.json``.
 
 Pure-compute tools (three, ``pure_compute`` annotation) operate on
@@ -25,10 +29,10 @@ These three are the post-fetch toolkit Claude uses to whittle a
 200-stream union down to a small handful of playable candidates
 before calling RD cache check / unrestrict.
 
-Annotation contract: 3 ``read_only`` + 3 ``pure_compute`` = 6 tools
-total. The per-tool mapping is enumerated explicitly in
-:func:`register_tools` (no integer-tally docstring claims, to avoid
-drift on future addition).
+Annotation mapping is enumerated explicitly per-tool in
+:func:`register_tools` to avoid integer-tally drift (each tool name
+appears next to its annotation; adding a tool means adding both the
+``mcp.tool`` call and a line here in the module docstring).
 """
 
 from __future__ import annotations
@@ -76,7 +80,11 @@ def stremio_dedupe_streams(streams: list[dict[str, Any]]) -> list[dict[str, Any]
     to collapse duplicates across multiple addons indexing the same
     upstream source (the first addon queried takes precedence).
 
-    Pure function: takes a list, returns a new list. Does not mutate.
+    Pure function: takes a list, returns a new list with the same
+    dict references. Does not mutate the input LIST or the per-stream
+    DICTS, but downstream mutation of a kept dict will also mutate
+    the input (shallow reference, not deep copy). Use ``copy.deepcopy``
+    at the call site if you need true isolation.
     """
     seen: set[str] = set()
     out: list[dict[str, Any]] = []
@@ -116,7 +124,11 @@ def stremio_filter_streams(
     Both filters short-circuit when their argument is ``None`` or
     empty -- pass empty to skip a stage entirely.
 
-    Pure function: takes a list, returns a new list. Does not mutate.
+    Pure function: takes a list, returns a new list with the same
+    dict references. Does not mutate the input LIST or the per-stream
+    DICTS, but downstream mutation of a kept dict will also mutate
+    the input (shallow reference, not deep copy). Use ``copy.deepcopy``
+    at the call site if you need true isolation.
     """
     out = list(streams)
     if preferred_languages:
@@ -165,7 +177,11 @@ def stremio_rank_streams(
     Stable sort: streams with equal sort tuples preserve their input
     order (Python's :func:`sorted` is stable).
 
-    Pure function: takes a list, returns a new list. Does not mutate.
+    Pure function: takes a list, returns a new list with the same
+    dict references. Does not mutate the input LIST or the per-stream
+    DICTS, but downstream mutation of a kept dict will also mutate
+    the input (shallow reference, not deep copy). Use ``copy.deepcopy``
+    at the call site if you need true isolation.
     """
 
     def key_for(s: dict[str, Any]) -> tuple[int, ...]:

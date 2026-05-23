@@ -72,6 +72,13 @@ class Attempt(BaseModel):
       :class:`MaestroException` whose body did not contain
       ``infringing_file``. Distinct from ``unrestrict_403_infringing``
       because the recovery path differs (no filter-gate strike learned).
+      Note: the name is narrower than the actual catch-all -- this
+      status is also emitted for HTTP 5xx, network errors, timeouts,
+      and any other non-infringing ``MaestroException`` raised by
+      ``rd_unrestrict``. Read it as "any non-filter-gate upstream
+      failure" rather than literal HTTP 4xx. A future split into
+      ``unrestrict_4xx`` / ``unrestrict_5xx`` / ``unrestrict_timeout``
+      / ``unrestrict_network`` would tighten the taxonomy.
     - ``unrestrict_403_infringing``: ``rd_unrestrict`` raised with
       ``infringing_file`` in the error body. Triggers a side effect:
       :meth:`FilterGateLearner.record_strike_and_persist` learns the

@@ -3,7 +3,7 @@
 The composer is the project's killer feature: it takes a human title
 (``"Foundation"``) and returns one playable Real-Debrid URL OR a
 structured failure that diagnoses why no candidate worked. It chains
-seven steps:
+eight steps:
 
     1. Cinemeta resolves the title to an IMDB id (best-effort; returns
        :attr:`StreamResolution.suggestion` if Cinemeta has no match).
@@ -13,11 +13,17 @@ seven steps:
     4. Real-Debrid batch ``check_cache`` overlays per-candidate cache
        status onto each candidate dict (in-place mutation).
     5. The runtime filter-gate heuristic overlays per-candidate risk
-       (``LOW`` / ``HIGH``) based on the extracted filename.
-    6. Candidates sort: cached + low-risk first, then cached + HIGH,
-       then uncached. Within each group the upstream AIOStreams order
-       is preserved (Python sort is stable).
-    7. The top candidate is resolved via RD ``unrestrict_link``. On
+       (``UNKNOWN`` / ``LOW`` / ``HIGH``) based on the extracted
+       filename.
+    6. Candidates sort into four buckets: cached + low-risk first,
+       then cached + HIGH-risk, then uncached + low-risk, then
+       uncached + HIGH-risk. Within each bucket the upstream
+       AIOStreams order is preserved (Python sort is stable).
+    7. If ``require_cached=True`` and ``fallback_to_uncached=False``,
+       uncached candidates are filtered out. An empty result here
+       returns the ``_NO_CACHED_SUGGESTION`` structured failure
+       BEFORE any unrestrict attempt.
+    8. The top candidate is resolved via RD ``unrestrict_link``. On
        failure, the loop pops the next candidate and retries; each
        attempt is recorded in :attr:`StreamResolution.attempts`. The
        loop terminates on success, ``budget_s`` exhaustion, or empty
@@ -40,16 +46,23 @@ Contract notes (surface area future callers should know):
   a single slow ``rd_unrestrict`` call can blow past ``budget_s``
   during its own execution. Callers needing strict bounds should
   set a short per-call timeout on ``rd_unrestrict`` itself.
-- **``fallback_to_uncached`` does double duty**: the flag controls
-  BOTH "include uncached candidates in the candidate list" AND
-  "attempt HIGH-filter-gate-risk candidates anyway." Callers wanting
-  uncached fallback without filter-gate bypass cannot express that
-  in v1 -- a future split into ``allow_uncached`` +
-  ``bypass_filter_gate`` would separate the concerns.
+- **``fallback_to_uncached`` controls two things**: the flag (a)
+  bypasses the cached-only filter when ``require_cached=True``,
+  letting uncached candidates remain in the list, AND (b) allows
+  ``HIGH``-filter-gate-risk candidates to be attempted (without the
+  flag they're pre-skipped as ``filter_gate_block``). Most useful
+  combinations are expressible -- ``require_cached=False,
+  fallback_to_uncached=False`` already means "include uncached AND
+  skip HIGH-risk." The single combination that's NOT expressible in
+  v1 is "cached only AND attempt HIGH-risk" (since setting
+  ``fallback_to_uncached=True`` to bypass the risk filter also
+  defeats ``require_cached``). A future split into ``allow_uncached``
+  + ``bypass_filter_gate`` would separate the concerns.
 - **Empty filename on infringing strike**: if
-  :func:`_extract_filename` returns ``None`` for the failing candidate,
-  ``record_strike_and_persist`` receives ``""`` and learns nothing
-  (the regex matches no tokens). Acceptable degradation, not a bug.
+  :func:`_extract_filename` returns ``None`` for the failing
+  candidate, ``record_strike_and_persist`` receives ``""`` and
+  learns nothing (the regex matches no tokens). Acceptable
+  degradation, not a bug.
 """
 
 from __future__ import annotations
@@ -139,7 +152,11 @@ def _filter_streams(
     are dropped. No substitution / regex; ``"CAM"`` would also match
     ``"webcam"`` if such a release tag existed.
 
-    Pure function: takes a list, returns a new list. Does not mutate.
+    Pure function: takes a list, returns a new list with the same
+    dict references. Does not mutate the input LIST or the per-stream
+    DICTS, but downstream mutation of a kept dict will also mutate
+    the input (shallow reference, not deep copy). Use ``copy.deepcopy``
+    at the call site if you need true isolation.
     """
     out: list[dict[str, Any]] = []
     for s in raw_streams:
@@ -173,13 +190,19 @@ def _overlay_cache_and_risk(
     - ``_filter_gate_risk`` (str): the ``.value`` of the
       :class:`RiskLevel` returned by
       :meth:`FilterGateLearner.predict_risk` for the extracted
-      filename. Computed ONCE here at the cache-overlay step; the
-      candidate loop in :func:`_try_candidate` reads this cached field
-      via ``candidate.get("_filter_gate_risk")`` rather than re-
-      invoking the learner. FastMCP's per-session serialization means
-      no concurrent strike-learning can mutate the learner between
-      the cache step and the loop, so the snapshot is fresh enough
-      for the duration of one composer call. If
+      filename. :class:`RiskLevel` is ternary (``UNKNOWN`` / ``LOW`` /
+      ``HIGH``); ``MEDIUM`` is reserved-but-unused in v1. Note that
+      empty / ``None`` filenames return ``UNKNOWN``, which sorts as
+      not-HIGH and is attempted unconditionally in
+      :func:`_try_candidate` -- the assumption is that unknown is
+      benign (better to attempt and possibly burn one RD call than
+      to silently skip). Computed ONCE here at the cache-overlay step;
+      the candidate loop in :func:`_try_candidate` reads this cached
+      field via ``candidate.get("_filter_gate_risk")`` rather than
+      re-invoking the learner. FastMCP's per-session serialization
+      means no concurrent strike-learning can mutate the learner
+      between the cache step and the loop, so the snapshot is fresh
+      enough for the duration of one composer call. If
       :func:`_overlay_cache_and_risk` is ever modified to skip
       candidates, the missing ``_filter_gate_risk`` field would cause
       :func:`_try_candidate` to treat them as not-HIGH (since
@@ -309,7 +332,14 @@ async def find_best_stream(
       to an MCP error response.
     - ``rd_check_cache``: only called if at least one candidate has
       a non-empty ``infoHash``. Streams without ``infoHash`` are still
-      attempted but sort as uncached.
+      attempted but sort as uncached. **Exceptions propagate out of
+      the composer** (unlike ``rd_unrestrict`` exceptions, which are
+      caught per-candidate); a transient RD outage during cache check
+      aborts the entire call. MCP middleware translates the propagated
+      ``MaestroException`` to a structured error response. Callers
+      needing graceful degradation (proceed with ``_cached=False`` for
+      all candidates on cache-check failure) should wrap the call
+      externally.
     - ``rd_unrestrict``: called once per candidate during the retry
       loop. Exceptions are caught and converted to ``Attempt`` rows;
       see :func:`_handle_unrestrict_exception`.
