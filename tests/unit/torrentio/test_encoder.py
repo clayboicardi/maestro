@@ -11,6 +11,29 @@ from maestro.torrentio.encoder import (
 )
 
 
+def test_parse_url_strips_query_string_before_kv_extraction() -> None:
+    """M-3 regression: ?query and #fragment after /manifest.json must not contaminate fields.
+
+    Pre-fix bug: a URL like '.../providers=yts/manifest.json?realdebrid=LEAKED'
+    parsed as providers=['yts?realdebrid=LEAKED'] -- the query-string debrid
+    token was swallowed into providers' value rather than landing in debrid_key,
+    AND a downstream validate_config error would dump the leaked token in
+    its message. Post-fix: query+fragment dropped before _KV_RE extraction.
+    """
+    url_with_query = (
+        "https://torrentio.strem.fun/providers=yts/manifest.json?realdebrid=LEAKED"
+    )
+    cfg = parse_url(url_with_query)
+    assert cfg.providers == ["yts"]
+    assert cfg.debrid_key is None  # query-string token NOT mis-routed into debrid_key
+    assert "LEAKED" not in (cfg.debrid_key or "")
+    assert "LEAKED" not in str(cfg.providers)
+
+    url_with_fragment = "https://torrentio.strem.fun/providers=yts/manifest.json#frag"
+    cfg = parse_url(url_with_fragment)
+    assert cfg.providers == ["yts"]  # no #frag contamination
+
+
 def test_torrentio_config_rejects_wire_form_keys() -> None:
     """M-1 regression: extra='forbid' must reject wire-form keys silently dropped pre-fix.
 

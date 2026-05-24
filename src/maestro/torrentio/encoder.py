@@ -150,6 +150,11 @@ def parse_url(url: str) -> TorrentioConfig:
     providers / sort options / debrid providers.
     """
     base_strip = re.sub(r"https?://[^/]+/?", "", url).strip("/")
+    # Drop query string + fragment BEFORE kv-extraction so a URL like
+    # .../providers=yts/manifest.json?realdebrid=LEAKED doesn't swallow the
+    # query-string token into providers' value (security: validation error
+    # would dump the leaked token; corruption: token lands in wrong field).
+    base_strip = base_strip.split("?", 1)[0].split("#", 1)[0]
     base_strip = base_strip.replace("/manifest.json", "").rstrip("/")
 
     cfg = TorrentioConfig()
