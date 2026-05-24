@@ -37,11 +37,20 @@ Silent-drop surfaces (input edge cases that don't raise):
   config as possible. Worth a follow-up to surface the drop as a
   ``validate_config`` warning.
 
-Secret-handling note: ``TorrentioConfig.debrid_key`` carries the
-debrid auth token in plain text (not :class:`pydantic.SecretStr`).
-Callers logging the config dict OR the URL output of :func:`build_url`
-will emit the token in their logs. Document the risk at any
-:func:`build_url` call site that touches a logged surface.
+Secret-handling: ``TorrentioConfig.debrid_key`` is
+:class:`pydantic.SecretStr`-wrapped, so ``repr(cfg)`` and
+``cfg.model_dump()`` mask the token as ``SecretStr('**********')``.
+The plain-text value only surfaces at the wire-format boundary inside
+:func:`build_url` via an explicit ``.get_secret_value()`` call --
+callers must avoid logging the build_url RETURN value if logs are
+secret-sensitive (the URL string itself isn't masked).
+
+Equivalent ``extra`` masking: ``TorrentioConfig.extra`` values are
+also :class:`pydantic.SecretStr`-wrapped. A debrid provider added
+upstream AFTER the last :data:`.enums.DEBRID_PROVIDERS` refresh lands
+in ``extra`` (not ``debrid_key``), but the masking still applies --
+so a stale enum can't silently re-introduce a plain-text leak via
+the unknown-key path.
 """
 
 from __future__ import annotations
@@ -50,7 +59,7 @@ import contextlib
 import re
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
 from maestro.torrentio.enums import DEBRID_PROVIDERS, PROVIDERS, QUALITY_FILTERS, SORT_OPTIONS
 
@@ -83,10 +92,11 @@ class TorrentioConfig(BaseModel):
       (e.g., ``<10gb``); not validated client-side.
     - ``debrid_provider``: one of :data:`.enums.DEBRID_PROVIDERS`
       (validated case-sensitively).
-    - ``debrid_key``: the debrid auth token; **carries a secret in
-      plain text** (no :class:`pydantic.SecretStr` wrapping). Callers
-      logging the config OR the URL output of :func:`build_url` leak
-      the token.
+    - ``debrid_key``: the debrid auth token wrapped in
+      :class:`pydantic.SecretStr` so ``repr(cfg)`` /
+      ``cfg.model_dump()`` mask it. Unwrap via
+      ``cfg.debrid_key.get_secret_value()`` at the wire-format
+      boundary (already handled internally by :func:`build_url`).
     - ``extra``: catch-all for unrecognized keys parsed from a URL.
       ``parse_url`` populates this with any ``key=value`` segment whose
       key isn't a known field name and isn't in
@@ -103,8 +113,8 @@ class TorrentioConfig(BaseModel):
     limit: int | None = None
     size_filter: str | None = None
     debrid_provider: str | None = None
-    debrid_key: str | None = None
-    extra: dict[str, str] = Field(default_factory=dict)
+    debrid_key: SecretStr | None = None
+    extra: dict[str, SecretStr] = Field(default_factory=dict)
 
 
 _KV_RE = re.compile(r"([a-zA-Z_][a-zA-Z0-9_]*)=([^|/]+)")
@@ -176,9 +186,13 @@ def parse_url(url: str) -> TorrentioConfig:
             cfg.size_filter = raw.strip()
         elif key in DEBRID_PROVIDERS:
             cfg.debrid_provider = key
-            cfg.debrid_key = raw.strip()
+            # SecretStr wraps the token so repr/model_dump masks it.
+            cfg.debrid_key = SecretStr(raw.strip())
         else:
-            cfg.extra[key] = raw.strip()
+            # Wrap extra values in SecretStr too -- a debrid provider added
+            # upstream AFTER the last DEBRID_PROVIDERS refresh lands here,
+            # carrying a token, with the same leak surface debrid_key has.
+            cfg.extra[key] = SecretStr(raw.strip())
     return cfg
 
 
@@ -215,9 +229,13 @@ def build_url(cfg: TorrentioConfig, *, base_url: str = "https://torrentio.strem.
     needing the override must pass it per-call.
 
     **Secret-leak surface**: the returned URL embeds
-    ``cfg.debrid_key`` in plain text. Any logger / display surface
-    that consumes the returned URL leaks the token. Callers must
-    sanitize or avoid logging.
+    ``cfg.debrid_key`` in plain text (via the explicit
+    ``.get_secret_value()`` call required for wire-format
+    serialization). The model itself masks ``debrid_key`` in repr /
+    model_dump, but the URL output cannot -- Torrentio addons need
+    the literal token in the path. Callers logging the returned URL
+    leak the token; sanitize via :func:`urllib.parse.urlparse` +
+    drop the path before logging, OR avoid logging the URL entirely.
     """
     parts: list[str] = []
     if cfg.providers:
@@ -233,9 +251,11 @@ def build_url(cfg: TorrentioConfig, *, base_url: str = "https://torrentio.strem.
     if cfg.size_filter:
         parts.append(f"sizefilter={cfg.size_filter}")
     for k, v in cfg.extra.items():
-        parts.append(f"{k}={v}")
+        # Extras are SecretStr -- unwrap once at the wire-format boundary.
+        parts.append(f"{k}={v.get_secret_value()}")
     if cfg.debrid_provider and cfg.debrid_key:
-        parts.append(f"{cfg.debrid_provider}={cfg.debrid_key}")
+        # Same wire-format boundary unwrap for the typed debrid token.
+        parts.append(f"{cfg.debrid_provider}={cfg.debrid_key.get_secret_value()}")
 
     base = base_url.rstrip("/")
     if not parts:
@@ -292,7 +312,13 @@ def validate_config(cfg: TorrentioConfig) -> list[str]:
         errors.append(f"unknown sort: {cfg.sort!r} (valid: {SORT_OPTIONS})")
 
     if cfg.debrid_provider and cfg.debrid_provider not in DEBRID_PROVIDERS:
-        errors.append(f"unknown debrid_provider: {cfg.debrid_provider!r}")
+        # Truncate the rejected value -- a caller might have fat-fingered a
+        # debrid token into this field instead of debrid_key, and !r-dumping
+        # the full value into a log line would leak the secret.
+        preview = cfg.debrid_provider[:8]
+        if len(cfg.debrid_provider) > 8:
+            preview = preview + "..."
+        errors.append(f"unknown debrid_provider: {preview!r} (valid: {DEBRID_PROVIDERS})")
 
     return errors
 

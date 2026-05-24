@@ -60,13 +60,28 @@ def torrentio_parse_url(url: str) -> dict[str, Any]:
     :func:`torrentio_validate_config` to surface unknown values.
 
     **Secret-leak surface**: returned dict's ``debrid_key`` field
-    carries the plain-text debrid auth token if the URL had one.
-    Callers logging the dict will leak the token. Sanitize via
-    pop/redact before any log call.
+    AND any ``extra`` values carry plain-text auth tokens (the
+    internal :class:`.encoder.TorrentioConfig` model wraps them in
+    :class:`pydantic.SecretStr` for repr/log protection, but the MCP
+    tool layer explicitly unwraps via ``.get_secret_value()`` so the
+    returned dict round-trips losslessly through
+    :func:`torrentio_build_url`). Callers logging the dict will leak
+    the tokens. Sanitize ``debrid_key`` AND clear/redact ``extra``
+    (any extra key may carry a future debrid provider's token added
+    upstream after the :data:`.enums.DEBRID_PROVIDERS` enum refresh).
 
     Reference: https://github.com/TheBeastLT/torrentio-scraper/blob/master/addon/lib/configuration.js
     """
-    return parse_url(url).model_dump()
+    cfg = parse_url(url)
+    dumped = cfg.model_dump()
+    # Unwrap SecretStr at the MCP boundary so the returned dict round-trips
+    # via torrentio_build_url. The SecretStr protection applies to internal
+    # Python repr/logger surfaces; the MCP tool boundary inherently exposes
+    # the value to the LLM caller, so masking here would break round-trip.
+    if cfg.debrid_key is not None:
+        dumped["debrid_key"] = cfg.debrid_key.get_secret_value()
+    dumped["extra"] = {k: v.get_secret_value() for k, v in cfg.extra.items()}
+    return dumped
 
 
 def torrentio_build_url(
@@ -92,9 +107,12 @@ def torrentio_build_url(
     env-var fallback in v1.
 
     **Secret-leak surface**: the returned URL embeds
-    ``config["debrid_key"]`` in plain text. Any logger / display
-    surface consuming the URL leaks the token. Sanitize before
-    logging.
+    ``config["debrid_key"]`` AND any debrid-shaped ``config["extra"]``
+    values in plain text (Torrentio addons require the literal token
+    in the URL path; SecretStr can't hide it at this boundary).
+    Callers logging the returned URL leak the tokens. Sanitize via
+    :func:`urllib.parse.urlparse` + drop the path before logging, OR
+    avoid logging the URL entirely.
     """
     cfg = TorrentioConfig.model_validate(config)
     return build_url(cfg, base_url=base_url)

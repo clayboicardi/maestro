@@ -1,7 +1,7 @@
 """Torrentio URL config encode/decode tests."""
 
 import pytest
-from pydantic import ValidationError
+from pydantic import SecretStr, ValidationError
 
 from maestro.torrentio.encoder import (
     TorrentioConfig,
@@ -64,7 +64,8 @@ def test_parse_url_extracts_providers() -> None:
     assert cfg.sort == "qualitysize"
     assert cfg.quality_filter == ["cam", "ts"]
     assert cfg.debrid_provider == "realdebrid"
-    assert cfg.debrid_key == "ABC123"
+    assert cfg.debrid_key is not None
+    assert cfg.debrid_key.get_secret_value() == "ABC123"
 
 
 def test_build_url_round_trips() -> None:
@@ -73,12 +74,13 @@ def test_build_url_round_trips() -> None:
         sort="qualitysize",
         quality_filter=["cam"],
         debrid_provider="realdebrid",
-        debrid_key="RD_TOKEN",
+        debrid_key=SecretStr("RD_TOKEN"),
     )
     url = build_url(cfg, base_url="https://torrentio.strem.fun")
     reparsed = parse_url(url)
     assert reparsed.providers == cfg.providers
-    assert reparsed.debrid_key == "RD_TOKEN"
+    assert reparsed.debrid_key is not None
+    assert reparsed.debrid_key.get_secret_value() == "RD_TOKEN"
 
 
 def test_validate_config_rejects_unknown_provider() -> None:
@@ -107,7 +109,7 @@ def test_validate_config_accepts_clay_optimization_config() -> None:
         sort="qualitysize",
         quality_filter=["3d", "480p", "scr", "cam"],
         debrid_provider="realdebrid",
-        debrid_key="RD_TOKEN",
+        debrid_key=SecretStr("RD_TOKEN"),
     )
     errors = validate_config(cfg)
     assert errors == []
@@ -118,6 +120,52 @@ def test_parse_url_handles_minimal() -> None:
     cfg = parse_url(url)
     assert cfg.providers == []
     assert cfg.debrid_provider is None
+
+
+def test_debrid_key_is_secretstr_masked_in_repr() -> None:
+    """M-5 regression: debrid_key must be SecretStr-masked in repr/model_dump."""
+    cfg = TorrentioConfig(
+        debrid_provider="realdebrid",
+        debrid_key=SecretStr("SECRET_TOKEN"),
+    )
+    assert "SECRET_TOKEN" not in repr(cfg)
+    assert "SECRET_TOKEN" not in str(cfg.model_dump())
+    # But the wire URL still embeds the real token (get_secret_value path).
+    url = build_url(cfg)
+    assert "SECRET_TOKEN" in url
+
+
+def test_extra_field_secret_leak_surface_is_masked() -> None:
+    """M-6 regression: extra-field values (unknown debrid providers) must also be SecretStr.
+
+    A future debrid provider added upstream after the last DEBRID_PROVIDERS
+    refresh lands in cfg.extra with the same token-carrying shape. Pre-fix:
+    extra was dict[str, str] -- plain leak. Post-fix: dict[str, SecretStr].
+    """
+    url = "https://torrentio.strem.fun/newdebrid=NEW_TOKEN/manifest.json"
+    cfg = parse_url(url)
+    # newdebrid isn't in DEBRID_PROVIDERS so it lands in extra
+    assert "newdebrid" in cfg.extra
+    # The extra value is SecretStr-masked in repr
+    assert "NEW_TOKEN" not in repr(cfg)
+    # But round-trips back into the URL via .get_secret_value() at build time
+    rebuilt = build_url(cfg)
+    assert "newdebrid=NEW_TOKEN" in rebuilt
+
+
+def test_validate_config_does_not_leak_debrid_token_via_error_message() -> None:
+    """S-4 regression: validate_config error must not !r-dump the full debrid_provider value.
+
+    A caller fat-fingering a debrid token into the debrid_provider field would
+    have leaked the secret via the error message's !r formatting. Post-fix:
+    first 8 chars + ellipsis only.
+    """
+    cfg = TorrentioConfig(debrid_provider="leaked_token_pretending_to_be_provider_name")
+    errors = validate_config(cfg)
+    assert len(errors) == 1
+    # Long token-shaped value gets truncated; full value NOT in error
+    assert "leaked_token_pretending" not in errors[0]
+    assert "leaked_t..." in errors[0]
 
 
 def test_build_url_omits_unset_keys() -> None:
