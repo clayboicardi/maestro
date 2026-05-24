@@ -2,7 +2,6 @@
 
 from maestro.torrentio.enums import (
     DEBRID_PROVIDERS,
-    LANGUAGES,
     PROVIDERS,
     QUALITY_FILTERS,
     SORT_OPTIONS,
@@ -31,18 +30,20 @@ def test_providers_includes_known_english_set() -> None:
 
 
 def test_quality_filters_includes_low_quality_exclusions() -> None:
-    expected = {"cam", "ts", "scr", "r5", "r6", "telesync"}
-    intersect = expected & set(QUALITY_FILTERS)
-    assert intersect, f"expected at least some of {expected} in {QUALITY_FILTERS}"
+    """QUALITY_FILTERS post-Phase-3.5 refresh against upstream filter.js."""
+    # Upstream keys verified via curl during the Phase 3.5 fix-PR refresh.
+    expected = {"cam", "scr", "4k", "1080p", "720p", "480p", "other", "unknown"}
+    missing = expected - set(QUALITY_FILTERS)
+    assert not missing, f"missing upstream quality filters: {missing}"
 
 
 def test_debrid_providers_includes_realdebrid() -> None:
     assert "realdebrid" in DEBRID_PROVIDERS
 
 
-def test_languages_includes_english() -> None:
-    assert "english" in LANGUAGES
-
-
-def test_sort_options_includes_quality_then_size() -> None:
-    assert "qualitysize" in SORT_OPTIONS
+def test_sort_options_matches_upstream_four_keys() -> None:
+    """SORT_OPTIONS post-Phase-3.5 refresh matches upstream sort.js:14-32 exactly."""
+    # Upstream SortOptions has 4 keys: quality, qualitysize, seeders, size.
+    # Pre-Phase-3.5 maestro had 6 keys with 3 fictional (qualityseeders,
+    # sizequality, seedersquality) and missing the actual upstream 'quality'.
+    assert set(SORT_OPTIONS) == {"quality", "qualitysize", "seeders", "size"}
