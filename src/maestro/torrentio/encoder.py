@@ -269,21 +269,13 @@ def validate_config(cfg: TorrentioConfig) -> list[str]:
     Empty list == valid. Each error string names the offending field
     + the rejected value + the valid set (full enum dump).
 
-    Case-handling asymmetry (intentional but worth knowing):
-
-    - ``providers`` and ``quality_filter`` items are lowercased before
-      membership check against :data:`.enums.PROVIDERS` /
-      :data:`.enums.QUALITY_FILTERS`. So ``"YTS"`` and ``"yts"``
-      both validate as the same provider.
-    - ``sort`` and ``debrid_provider`` are checked WITHOUT lowercasing.
-      So ``"qualitysize"`` validates but ``"QualitySize"`` errors.
-
-    This asymmetry mirrors the upstream Torrentio behavior:
-    providers/quality_filter are case-folded by the addon, but sort
-    and debrid keys are matched verbatim. The error messages do NOT
-    flag the asymmetry, so callers misinterpreting a case-sensitive
-    rejection may waste time -- worth surfacing in a future polish
-    item.
+    Case-handling: all field values are lowercased before membership
+    check against the enum constants. This mirrors upstream Torrentio
+    behavior -- ``configuration.js:43`` lowercases parameter keys at
+    parse time, and ``sort.js:48`` lowercases the sort value at
+    consumption. So ``{"sort": "QualitySize"}``,
+    ``{"providers": ["YTS"]}``, and ``{"debrid_provider": "RealDebrid"}``
+    all validate. The same applies to ``quality_filter``.
 
     Fields NOT validated in v1:
 
@@ -308,10 +300,14 @@ def validate_config(cfg: TorrentioConfig) -> list[str]:
         if q.lower() not in QUALITY_FILTERS:
             errors.append(f"unknown quality_filter: {q!r}")
 
-    if cfg.sort and cfg.sort not in SORT_OPTIONS:
+    # Lowercase sort + debrid_provider before membership check to mirror
+    # upstream Torrentio behavior (configuration.js:43 lowercases all keys;
+    # sort.js:48 lowercases the sort value at consumption). Pre-fix maestro
+    # rejected 'QualitySize' which upstream would accept.
+    if cfg.sort and cfg.sort.lower() not in SORT_OPTIONS:
         errors.append(f"unknown sort: {cfg.sort!r} (valid: {SORT_OPTIONS})")
 
-    if cfg.debrid_provider and cfg.debrid_provider not in DEBRID_PROVIDERS:
+    if cfg.debrid_provider and cfg.debrid_provider.lower() not in DEBRID_PROVIDERS:
         # Truncate the rejected value -- a caller might have fat-fingered a
         # debrid token into this field instead of debrid_key, and !r-dumping
         # the full value into a log line would leak the secret.

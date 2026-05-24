@@ -153,6 +153,19 @@ def test_extra_field_secret_leak_surface_is_masked() -> None:
     assert "newdebrid=NEW_TOKEN" in rebuilt
 
 
+def test_validate_config_lowercases_sort_and_debrid_to_mirror_upstream() -> None:
+    """M-2 regression: validate_config must case-fold sort + debrid_provider per upstream.
+
+    Pre-fix: validate_config rejected 'QualitySize' (sort) and 'RealDebrid' (debrid)
+    despite upstream Torrentio accepting both via .toLowerCase() at consumption.
+    Project-CC live-fetched upstream sort.js:48 to refute the pre-fix docstring
+    claim that maestro 'mirrors upstream behavior.'
+    """
+    cfg = TorrentioConfig(sort="QualitySize", debrid_provider="RealDebrid")
+    errors = validate_config(cfg)
+    assert errors == [], f"unexpected errors: {errors}"
+
+
 def test_validate_config_does_not_leak_debrid_token_via_error_message() -> None:
     """S-4 regression: validate_config error must not !r-dump the full debrid_provider value.
 
