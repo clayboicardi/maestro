@@ -118,7 +118,11 @@ class TorrentioConfig(BaseModel):
     extra: dict[str, SecretStr] = Field(default_factory=dict)
 
 
-_KV_RE = re.compile(r"([a-zA-Z_][a-zA-Z0-9_]*)=([^|/]+)")
+# Anchored to match only at start-of-string OR after a pipe/slash boundary
+# (the wire-format key separators). Pre-anchor regex matched anywhere, which
+# silently truncated keys with non-alphanumeric prefixes -- e.g.,
+# `key-with-dash=value` produced `('dash', 'value')` rather than no match.
+_KV_RE = re.compile(r"(?:^|[|/])([a-zA-Z_][a-zA-Z0-9_]*)=([^|/]+)")
 
 
 def parse_url(url: str) -> TorrentioConfig:
@@ -160,13 +164,19 @@ def parse_url(url: str) -> TorrentioConfig:
     afterwards with :func:`validate_config` to surface unknown
     providers / sort options / debrid providers.
     """
-    base_strip = re.sub(r"https?://[^/]+/?", "", url).strip("/")
+    # Anchored `^` so we strip only the LEADING scheme+host prefix, not any
+    # occurrence of `https?://` later in the string (pre-fix re.sub matched
+    # globally and could mangle inputs with embedded URLs).
+    base_strip = re.sub(r"^https?://[^/]+/?", "", url).strip("/")
     # Drop query string + fragment BEFORE kv-extraction so a URL like
     # .../providers=yts/manifest.json?realdebrid=LEAKED doesn't swallow the
     # query-string token into providers' value (security: validation error
     # would dump the leaked token; corruption: token lands in wrong field).
     base_strip = base_strip.split("?", 1)[0].split("#", 1)[0]
-    base_strip = base_strip.replace("/manifest.json", "").rstrip("/")
+    # removesuffix (Python 3.9+) is anchored to the END -- pre-fix `.replace`
+    # was global and would corrupt a debrid_key containing the literal
+    # `/manifest.json` substring.
+    base_strip = base_strip.removesuffix("/manifest.json").rstrip("/")
 
     cfg = TorrentioConfig()
     for match in _KV_RE.finditer(base_strip):
