@@ -125,18 +125,19 @@ def torrentio_validate_config(config: dict[str, Any]) -> list[str]:
     the config validates. Wraps :func:`.encoder.validate_config`
     after Pydantic-validating the input dict.
 
-    **Case-handling asymmetry** (mirrors the upstream Torrentio addon;
-    intentional but worth knowing):
+    **Case-handling** (mirrors upstream Torrentio behavior post-
+    Phase-3.5 fix; all 4 enum-gated fields case-insensitive):
 
-    - ``providers`` and ``quality_filter`` items are lowercased before
-      membership check -- ``{"providers": ["YTS"]}`` validates.
-    - ``sort`` and ``debrid_provider`` are matched verbatim --
-      ``{"sort": "Qualitysize"}`` errors despite being a valid value.
+    - ``providers``, ``quality_filter``, ``sort``, and
+      ``debrid_provider`` items are all lowercased before membership
+      check. ``{"providers": ["YTS"]}``, ``{"sort": "QualitySize"}``,
+      and ``{"debrid_provider": "RealDebrid"}`` all validate clean.
 
     Fields NOT validated in v1 (callers should know):
 
-    - ``languages``: pass-through, no membership check (the
-      :data:`.enums.LANGUAGES` constant is unused).
+    - ``languages``: pass-through, no membership check. The upstream
+      Torrentio language mapping (``languages.js``) is open-ended;
+      maestro doesn't gate the field.
     - ``limit`` / ``size_filter``: type-checked by Pydantic only.
     - ``extra``: catch-all, never errors.
 

@@ -80,13 +80,15 @@ class TorrentioConfig(BaseModel):
     - ``providers``: subset of :data:`.enums.PROVIDERS` (validated
       case-insensitively but wire-emitted verbatim from the input).
     - ``sort``: one of :data:`.enums.SORT_OPTIONS` (validated
-      case-sensitively, unlike ``providers``).
+      case-insensitively post-Phase-3.5 to mirror upstream sort.js).
     - ``quality_filter``: subset of :data:`.enums.QUALITY_FILTERS`
       (validated case-insensitively). Items are EXCLUSION tags --
       release types to drop.
-    - ``languages``: subset of :data:`.enums.LANGUAGES` (NOT currently
-      validated; the LANGUAGES constant is defined for reference but
-      :func:`validate_config` doesn't check membership).
+    - ``languages``: list of upstream Torrentio language tokens
+      (e.g., ``["english", "french"]``); NOT validated client-side
+      against any enum constant (the upstream ``languages.js``
+      mapping is open-ended). Pythonic plural here; the WIRE form
+      is singular ``language=`` per upstream.
     - ``limit``: integer cap on returned streams; silently dropped if
       the URL had a non-int value (see :func:`parse_url` docstring).
     - ``size_filter``: free-form expression evaluated upstream.
@@ -237,7 +239,7 @@ def build_url(cfg: TorrentioConfig, *, base_url: str = "https://torrentio.strem.
        parse time (see :func:`parse_url` docstring) and therefore
        LOST on round-trip. The rebuilt URL omits the segment.
     2. ``extra`` keys that collide with the wire form of a recognized
-       field (``providers``, ``sort``, ``qualityfilter``, ``languages``,
+       field (``providers``, ``sort``, ``qualityfilter``, ``language``,
        ``limit``, ``sizefilter``, or any
        :data:`.enums.DEBRID_PROVIDERS` member) cause this function to
        emit duplicate ``key=`` segments. On re-parse, the last
