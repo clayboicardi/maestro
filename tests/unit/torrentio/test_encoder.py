@@ -20,9 +20,7 @@ def test_parse_url_strips_query_string_before_kv_extraction() -> None:
     AND a downstream validate_config error would dump the leaked token in
     its message. Post-fix: query+fragment dropped before _KV_RE extraction.
     """
-    url_with_query = (
-        "https://torrentio.strem.fun/providers=yts/manifest.json?realdebrid=LEAKED"
-    )
+    url_with_query = "https://torrentio.strem.fun/providers=yts/manifest.json?realdebrid=LEAKED"
     cfg = parse_url(url_with_query)
     assert cfg.providers == ["yts"]
     assert cfg.debrid_key is None  # query-string token NOT mis-routed into debrid_key

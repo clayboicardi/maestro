@@ -89,8 +89,11 @@ class TorrentioConfig(BaseModel):
       :func:`validate_config` doesn't check membership).
     - ``limit``: integer cap on returned streams; silently dropped if
       the URL had a non-int value (see :func:`parse_url` docstring).
-    - ``size_filter``: free-form expression evaluated upstream
-      (e.g., ``<10gb``); not validated client-side.
+    - ``size_filter``: free-form expression evaluated upstream.
+      Upstream uppercases the value via ``filter.js`` before
+      ``parseSize``, so pass uppercase units (e.g., ``<10GB`` --
+      lowercase ``<10gb`` parses as NaN and filters out ALL streams).
+      Not validated client-side.
     - ``debrid_provider``: one of :data:`.enums.DEBRID_PROVIDERS`
       (validated case-sensitively).
     - ``debrid_key``: the debrid auth token wrapped in
@@ -124,16 +127,25 @@ class TorrentioConfig(BaseModel):
 # `key-with-dash=value` produced `('dash', 'value')` rather than no match.
 _KV_RE = re.compile(r"(?:^|[|/])([a-zA-Z_][a-zA-Z0-9_]*)=([^|/]+)")
 
+# Max chars of a rejected debrid_provider value to show in error messages
+# before truncating with an ellipsis -- defends against fat-fingered
+# token-in-wrong-field secret leaks via the !r format.
+_PREVIEW_CHAR_LIMIT = 8
+
 
 def parse_url(url: str) -> TorrentioConfig:
     """Parse a Torrentio install URL into a :class:`TorrentioConfig`.
 
     Decoding steps:
 
-    1. Strip the scheme + host prefix via the ``https?://[^/]+/?`` regex.
-       Inputs without an ``http://`` or ``https://`` scheme are left
-       unchanged (so a path-only ``providers=yts/manifest.json`` parses
-       too); other schemes (``ftp://`` etc.) are NOT stripped.
+    1. Strip the LEADING scheme + host prefix via the anchored
+       ``^https?://[^/]+/?`` regex. Inputs without an ``http://`` or
+       ``https://`` scheme are left unchanged (so a path-only
+       ``providers=yts/manifest.json`` parses too). Non-http schemes
+       (``ftp://``, ``data:``, etc.) are NOT stripped, but the
+       downstream :data:`_KV_RE` is anchored to pipe/slash boundaries
+       so the host segment of a non-http URL doesn't produce
+       spurious kv matches.
     2. Strip a trailing ``/manifest.json`` suffix and surrounding slashes.
     3. Iterate :data:`_KV_RE` matches over the remaining pipe-delimited
        segment. Each ``<key>=<value>`` pair is lowercased on key and
@@ -218,7 +230,20 @@ def build_url(cfg: TorrentioConfig, *, base_url: str = "https://torrentio.strem.
     Inverse of :func:`parse_url`; the round-trip
     ``build_url(parse_url(url))`` is field-preserving for all
     documented fields (providers, sort, quality_filter, languages,
-    limit, size_filter, debrid_provider, debrid_key, extra).
+    limit, size_filter, debrid_provider, debrid_key, extra) **EXCEPT**
+    in two cases:
+
+    1. ``limit=`` segments with non-int values are silently dropped at
+       parse time (see :func:`parse_url` docstring) and therefore
+       LOST on round-trip. The rebuilt URL omits the segment.
+    2. ``extra`` keys that collide with the wire form of a recognized
+       field (``providers``, ``sort``, ``qualityfilter``, ``languages``,
+       ``limit``, ``sizefilter``, or any
+       :data:`.enums.DEBRID_PROVIDERS` member) cause this function to
+       emit duplicate ``key=`` segments. On re-parse, the last
+       occurrence wins, silently overwriting the typed field's value.
+       Callers populating ``extra`` directly (vs. via :func:`parse_url`)
+       should avoid these key names.
 
     Field-emission order (fixed; produces deterministic URLs for
     snapshot testing):
@@ -303,10 +328,23 @@ def validate_config(cfg: TorrentioConfig) -> list[str]:
     - ``limit`` / ``size_filter``: range / format not validated.
     - ``extra``: catch-all; never errors.
 
-    Error message verbosity: provider / quality-filter errors include
-    the FULL enum dump (24 providers, 19 quality filters). UX
-    improvement candidate -- trim to a "did you mean?" suggestion or
-    a link instead of the full list.
+    Error message verbosity (asymmetric across fields):
+
+    - ``providers`` and ``sort`` errors include the FULL enum dump
+      (24 / 4 items respectively) for self-discovery.
+    - ``quality_filter`` errors are bare (just the rejected value).
+      Callers can enumerate valid values via
+      :func:`torrentio_list_quality_filters`.
+    - ``debrid_provider`` errors include the enum dump (8 items)
+      AND truncate the rejected value to first 8 chars + ellipsis
+      to avoid leaking a fat-fingered token (see :class:`SecretStr`
+      note above).
+
+    UX improvement candidate: trim the providers + sort dumps to
+    "did you mean?" suggestions (use ``difflib.get_close_matches``)
+    rather than the full list, OR consolidate via the discovery
+    tools (``torrentio_list_*``). Out of scope for this docstring
+    pass.
     """
     errors: list[str] = []
 
@@ -329,8 +367,8 @@ def validate_config(cfg: TorrentioConfig) -> list[str]:
         # Truncate the rejected value -- a caller might have fat-fingered a
         # debrid token into this field instead of debrid_key, and !r-dumping
         # the full value into a log line would leak the secret.
-        preview = cfg.debrid_provider[:8]
-        if len(cfg.debrid_provider) > 8:
+        preview = cfg.debrid_provider[:_PREVIEW_CHAR_LIMIT]
+        if len(cfg.debrid_provider) > _PREVIEW_CHAR_LIMIT:
             preview = preview + "..."
         errors.append(f"unknown debrid_provider: {preview!r} (valid: {DEBRID_PROVIDERS})")
 

@@ -20,7 +20,7 @@ Layered as:
   round-trip operations on the pipe-delimited config segment of
   the install URL.
 - :mod:`.tools` -- MCP-facing wrappers that take/return plain dicts so
-  the MCP client can manipulate configs without round-tripping
+  the MCP caller can manipulate configs without round-tripping
   Pydantic models. ``SecretStr``-wrapped debrid tokens unwrap once
   at this boundary so the returned dict round-trips losslessly.
 

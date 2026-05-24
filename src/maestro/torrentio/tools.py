@@ -1,10 +1,10 @@
 """Torrentio MCP tool definitions -- five pure-compute tools listed below.
 
-All five tools are deterministic functions over the Torrentio config
+All seven tools are deterministic functions over the Torrentio config
 grammar -- no network, no in-memory state, no side effects. Wraps
-:mod:`.encoder` and :mod:`.enums` so Claude can manipulate configs as
-plain dicts without round-tripping through the :class:`.encoder.TorrentioConfig`
-Pydantic model.
+:mod:`.encoder` and :mod:`.enums` so the MCP caller can manipulate
+configs as plain dicts without round-tripping through the
+:class:`.encoder.TorrentioConfig` Pydantic model.
 
 Per-tool annotation mapping is enumerated in
 :func:`.register_tools` (see :mod:`maestro.torrentio` package
