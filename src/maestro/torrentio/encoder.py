@@ -16,11 +16,13 @@ Where:
   rather than the generic ``debrid=...`` -- the parser detects debrid
   by matching the key against :data:`.enums.DEBRID_PROVIDERS`.
 
-Wire-vs-model naming asymmetries (the model uses Pythonic snake_case;
-the wire format does NOT):
+Wire-vs-model naming asymmetries (the model uses Pythonic snake_case
++ plural lists; the wire format uses upstream's lower/singular keys):
 
 - Wire ``qualityfilter`` <-> model ``quality_filter``
 - Wire ``sizefilter`` <-> model ``size_filter``
+- Wire ``language`` (singular per upstream ``languages.js:51``
+  ``LanguageOptions.key``) <-> model ``languages`` (plural list)
 - Wire ``<debrid_provider>`` (e.g., ``realdebrid``) <-> model
   ``debrid_provider`` + ``debrid_key``
 
@@ -177,7 +179,12 @@ def parse_url(url: str) -> TorrentioConfig:
             cfg.sort = raw.strip()
         elif key == "qualityfilter":
             cfg.quality_filter = [q.strip() for q in raw.split(",") if q.strip()]
-        elif key == "languages":
+        elif key == "language":
+            # Wire key is SINGULAR (upstream languages.js:51 `LanguageOptions.key`
+            # is 'language'). Model field stays plural per Pythonic snake_case.
+            # Pre-fix module matched key=='languages' which NEVER fires against
+            # real Torrentio URLs -- real `language=english` URLs landed in
+            # cfg.extra and rebuilt as `languages=...` URLs upstream ignored.
             cfg.languages = [lang.strip() for lang in raw.split(",") if lang.strip()]
         elif key == "limit":
             with contextlib.suppress(ValueError):
@@ -245,7 +252,9 @@ def build_url(cfg: TorrentioConfig, *, base_url: str = "https://torrentio.strem.
     if cfg.quality_filter:
         parts.append(f"qualityfilter={','.join(cfg.quality_filter)}")
     if cfg.languages:
-        parts.append(f"languages={','.join(cfg.languages)}")
+        # Wire key is SINGULAR per upstream languages.js:51 -- emit `language=`
+        # not `languages=` so Torrentio actually consumes the list.
+        parts.append(f"language={','.join(cfg.languages)}")
     if cfg.limit is not None:
         parts.append(f"limit={cfg.limit}")
     if cfg.size_filter:

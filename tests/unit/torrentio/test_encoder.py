@@ -153,6 +153,25 @@ def test_extra_field_secret_leak_surface_is_masked() -> None:
     assert "newdebrid=NEW_TOKEN" in rebuilt
 
 
+def test_language_wire_key_is_singular_per_upstream() -> None:
+    """M-4 regression: wire key for language list must be singular per upstream.
+
+    Pre-fix: maestro emitted/parsed `languages=` (plural) but upstream Torrentio
+    addon uses `language=` (singular -- LanguageOptions.key='language' in
+    upstream addon/lib/languages.js:51). Real Torrentio URLs with `language=`
+    landed in cfg.extra; maestro-built URLs with `languages=` upstream ignored.
+    Verified by curl'ing upstream languages.js + configuration.js.
+    """
+    # Round-trip: parse upstream-shaped URL, rebuild, must produce upstream-shaped URL
+    url = "https://torrentio.strem.fun/providers=yts|language=english,french/manifest.json"
+    cfg = parse_url(url)
+    assert cfg.languages == ["english", "french"]  # parsed into the model field
+    assert "language" not in cfg.extra  # NOT mis-routed to extra
+    rebuilt = build_url(cfg)
+    assert "language=english,french" in rebuilt  # singular wire key
+    assert "languages=" not in rebuilt  # NOT emitting plural
+
+
 def test_validate_config_lowercases_sort_and_debrid_to_mirror_upstream() -> None:
     """M-2 regression: validate_config must case-fold sort + debrid_provider per upstream.
 
