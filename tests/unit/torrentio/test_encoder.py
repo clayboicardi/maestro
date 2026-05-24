@@ -107,7 +107,7 @@ def test_validate_config_accepts_clay_optimization_config() -> None:
             "nekobt",
         ],
         sort="qualitysize",
-        quality_filter=["3d", "480p", "scr", "cam"],
+        quality_filter=["threed", "480p", "scr", "cam"],
         debrid_provider="realdebrid",
         debrid_key=SecretStr("RD_TOKEN"),
     )

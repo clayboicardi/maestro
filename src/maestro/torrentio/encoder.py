@@ -59,7 +59,6 @@ from __future__ import annotations
 
 import contextlib
 import re
-from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
@@ -326,19 +325,3 @@ def validate_config(cfg: TorrentioConfig) -> list[str]:
         errors.append(f"unknown debrid_provider: {preview!r} (valid: {DEBRID_PROVIDERS})")
 
     return errors
-
-
-def _data() -> dict[str, Any]:
-    """Diagnostic dump of which enum constants are loaded.
-
-    DEAD CODE in v1 -- nothing imports or calls this. Retained as a
-    debugging hook for ``uv run python -c`` introspection, but
-    candidate for removal. Pyright flags it as unused; the
-    flag is documented and acknowledged rather than suppressed.
-    """
-    return {
-        "providers": PROVIDERS,
-        "quality_filters": QUALITY_FILTERS,
-        "debrid_providers": DEBRID_PROVIDERS,
-        "sort_options": SORT_OPTIONS,
-    }
