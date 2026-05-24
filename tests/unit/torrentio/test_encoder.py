@@ -1,11 +1,33 @@
 """Torrentio URL config encode/decode tests."""
 
+import pytest
+from pydantic import ValidationError
+
 from maestro.torrentio.encoder import (
     TorrentioConfig,
     build_url,
     parse_url,
     validate_config,
 )
+
+
+def test_torrentio_config_rejects_wire_form_keys() -> None:
+    """M-1 regression: extra='forbid' must reject wire-form keys silently dropped pre-fix.
+
+    Pre-fix bug: TorrentioConfig had no extra='forbid', so a caller passing the
+    wire-form 'qualityfilter' (instead of the model 'quality_filter') silently
+    dropped the data with zero error. My validate_config docstring claimed
+    Pydantic raises ValidationError on unknown fields; the claim was false.
+
+    Post-fix: extra='forbid' produces ValidationError on the wire-form name.
+    """
+    with pytest.raises(ValidationError):
+        TorrentioConfig.model_validate({"qualityfilter": ["cam"]})
+    with pytest.raises(ValidationError):
+        TorrentioConfig.model_validate({"sizefilter": "<10GB"})
+    # Known model field stays valid
+    cfg = TorrentioConfig.model_validate({"quality_filter": ["cam"]})
+    assert cfg.quality_filter == ["cam"]
 
 
 def test_parse_url_extracts_providers() -> None:

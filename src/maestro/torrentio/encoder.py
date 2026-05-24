@@ -50,13 +50,19 @@ import contextlib
 import re
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from maestro.torrentio.enums import DEBRID_PROVIDERS, PROVIDERS, QUALITY_FILTERS, SORT_OPTIONS
 
 
 class TorrentioConfig(BaseModel):
     """A Torrentio install-URL configuration; round-trippable with parse + build.
+
+    Validation: ``extra="forbid"`` so callers passing wire-form keys
+    (e.g., ``qualityfilter`` instead of model ``quality_filter``) get
+    a loud :class:`pydantic.ValidationError` rather than a silent
+    drop. The wire-vs-model name asymmetry (see module docstring) was
+    a silent-data-loss surface before this guard.
 
     Snake-case Python model that mirrors the kebab-case wire format
     (see module docstring for the asymmetries). Field semantics:
@@ -87,6 +93,8 @@ class TorrentioConfig(BaseModel):
       :data:`.enums.DEBRID_PROVIDERS`. ``build_url`` round-trips these
       back into the URL.
     """
+
+    model_config = ConfigDict(extra="forbid")
 
     providers: list[str] = Field(default_factory=list)
     sort: str | None = None
