@@ -23,17 +23,19 @@ async def test_all_torrentio_tools_registered() -> None:
         "torrentio_validate_config",
         "torrentio_list_providers",
         "torrentio_list_quality_filters",
+        "torrentio_list_sort_options",
+        "torrentio_list_debrid_providers",
     ]
     for name in expected:
         assert name in names, f"expected torrentio tool {name!r} not registered"
 
 
-async def test_total_torrentio_tool_count_is_5() -> None:
-    """Locks the tool surface count -- Phase 4 ships exactly 5 Torrentio tools."""
+async def test_total_torrentio_tool_count_is_7() -> None:
+    """Locks the torrentio tool surface count: 1 read_only + 6 pure_compute = 7."""
     mcp = create_server()
     tools = await mcp.list_tools()
     torrentio_tools = [t for t in tools if t.name.startswith("torrentio_")]
-    assert len(torrentio_tools) == 5
+    assert len(torrentio_tools) == 7
 
 
 async def test_torrentio_annotation_types_correct() -> None:
@@ -62,12 +64,14 @@ async def test_torrentio_annotation_types_correct() -> None:
         f"torrentio_parse_url: expected destructiveHint=False, got {parse_ann.destructiveHint}"
     )
 
-    # The other 4 are pure_compute -- no I/O, deterministic transforms over fixed enums.
+    # The other 6 are pure_compute -- no I/O, deterministic transforms over fixed enums.
     expected_pure_compute = {
         "torrentio_build_url",
         "torrentio_validate_config",
         "torrentio_list_providers",
         "torrentio_list_quality_filters",
+        "torrentio_list_sort_options",
+        "torrentio_list_debrid_providers",
     }
     for name in expected_pure_compute:
         tool = by_name[name]

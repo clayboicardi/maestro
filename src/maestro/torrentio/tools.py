@@ -33,7 +33,7 @@ from maestro.torrentio.encoder import (
     parse_url,
     validate_config,
 )
-from maestro.torrentio.enums import PROVIDERS, QUALITY_FILTERS
+from maestro.torrentio.enums import DEBRID_PROVIDERS, PROVIDERS, QUALITY_FILTERS, SORT_OPTIONS
 
 
 def torrentio_parse_url(url: str) -> dict[str, Any]:
@@ -165,8 +165,34 @@ def torrentio_list_quality_filters() -> list[str]:
 
     Returns a NEW list copy of :data:`.enums.QUALITY_FILTERS`. The
     tags are EXCLUSION markers (release types to DROP from results),
-    so passing ``["cam", "ts"]`` filters out cam/telesync rips.
+    so passing ``["cam", "scr"]`` filters out cam/screener rips.
     Refresh cadence: same as :func:`torrentio_list_providers` --
     hand-maintained, no drift check.
     """
     return list(QUALITY_FILTERS)
+
+
+def torrentio_list_sort_options() -> list[str]:
+    """Return a snapshot of valid sort-strategy keys.
+
+    Returns a NEW list copy of :data:`.enums.SORT_OPTIONS` -- the
+    four keys upstream Torrentio's ``sort.js`` recognizes
+    (``quality``, ``qualitysize``, ``seeders``, ``size``).
+    Symmetric discovery surface for the ``sort`` config field --
+    callers building a config can enumerate valid values rather
+    than waiting for a validation error.
+    """
+    return list(SORT_OPTIONS)
+
+
+def torrentio_list_debrid_providers() -> list[str]:
+    """Return a snapshot of recognized debrid providers.
+
+    Returns a NEW list copy of :data:`.enums.DEBRID_PROVIDERS`.
+    Discovery surface for the ``debrid_provider`` config field --
+    callers can enumerate which debrid services maestro recognizes
+    by name (vs. landing in the ``extra`` catch-all). Unrecognized
+    debrid names are still parsed into ``extra`` with their token
+    intact (and SecretStr-masked) for upstream Torrentio to handle.
+    """
+    return list(DEBRID_PROVIDERS)
