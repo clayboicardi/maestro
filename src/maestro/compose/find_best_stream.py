@@ -1,18 +1,68 @@
-"""find_best_stream composer.
+"""find_best_stream composer -- chains AIOStreams + RD + filter-gate.
 
-Chains:
-    1. Cinemeta resolve title -> imdb_id
-    2. Stremio query AIOStreams' /stream/ endpoint
-    3. RD cache check (batch)
-    4. Filter-gate overlay
-    5. Sort candidates (cached & low-risk > cached & risk > uncached)
-    6. Resolve top candidate via RD unrestrict
-    7. On failure, pop next and retry; record attempts
+The composer is the project's killer feature: it takes a human title
+(``"Foundation"``) and returns one playable Real-Debrid URL OR a
+structured failure that diagnoses why no candidate worked. It chains
+eight steps:
 
-Returns StreamResolution (success or structured failure with `attempts`).
+    1. Cinemeta resolves the title to an IMDB id (best-effort; returns
+       :attr:`StreamResolution.suggestion` if Cinemeta has no match).
+    2. The Stremio addon protocol queries AIOStreams' ``/stream/``
+       endpoint for that IMDB id (and season/episode for series).
+    3. Local language + quality filters drop non-preferred streams.
+    4. Real-Debrid batch ``check_cache`` overlays per-candidate cache
+       status onto each candidate dict (in-place mutation).
+    5. The runtime filter-gate heuristic overlays per-candidate risk
+       (``UNKNOWN`` / ``LOW`` / ``HIGH``) based on the extracted
+       filename.
+    6. Candidates sort into four buckets: cached + low-risk first,
+       then cached + HIGH-risk, then uncached + low-risk, then
+       uncached + HIGH-risk. Within each bucket the upstream
+       AIOStreams order is preserved (Python sort is stable).
+    7. If ``require_cached=True`` and ``fallback_to_uncached=False``,
+       uncached candidates are filtered out. An empty result here
+       returns the ``_NO_CACHED_SUGGESTION`` structured failure
+       BEFORE any unrestrict attempt.
+    8. The top candidate is resolved via RD ``unrestrict_link``. On
+       failure, the loop pops the next candidate and retries; each
+       attempt is recorded in :attr:`StreamResolution.attempts`. The
+       loop terminates on success, ``budget_s`` exhaustion, or empty
+       candidate list.
 
-This module is parameterized to accept callables for sub-domain
-operations -- keeps it test-friendly and avoids tight coupling.
+Side effects: when an attempt fails with ``infringing_file`` (RD's
+filter-gate 403), the learner's :meth:`record_strike_and_persist` is
+called so future calls can predict the same failure pre-network.
+
+Contract notes (surface area future callers should know):
+
+- **Parameterization over callables**: the composer accepts
+  ``cinemeta_search`` / ``stremio_query`` / ``rd_check_cache`` /
+  ``rd_unrestrict`` as callables, not as toolset references. Keeps
+  the composer unit-testable with mock implementations and avoids
+  coupling to specific toolset internals.
+- **No tenacity / no per-attempt timeout**: retry logic is the
+  candidate-iteration loop, not a backoff schedule. The only time
+  bound is ``budget_s``, checked BEFORE each candidate attempt --
+  a single slow ``rd_unrestrict`` call can blow past ``budget_s``
+  during its own execution. Callers needing strict bounds should
+  set a short per-call timeout on ``rd_unrestrict`` itself.
+- **``fallback_to_uncached`` controls two things**: the flag (a)
+  bypasses the cached-only filter when ``require_cached=True``,
+  letting uncached candidates remain in the list, AND (b) allows
+  ``HIGH``-filter-gate-risk candidates to be attempted (without the
+  flag they're pre-skipped as ``filter_gate_block``). Most useful
+  combinations are expressible -- ``require_cached=False,
+  fallback_to_uncached=False`` already means "include uncached AND
+  skip HIGH-risk." The single combination that's NOT expressible in
+  v1 is "cached only AND attempt HIGH-risk" (since setting
+  ``fallback_to_uncached=True`` to bypass the risk filter also
+  defeats ``require_cached``). A future split into ``allow_uncached``
+  + ``bypass_filter_gate`` would separate the concerns.
+- **Empty filename on infringing strike**: if
+  :func:`_extract_filename` returns ``None`` for the failing
+  candidate, ``record_strike_and_persist`` receives ``""`` and
+  learns nothing (the regex matches no tokens). Acceptable
+  degradation, not a bug.
 """
 
 from __future__ import annotations
@@ -37,6 +87,17 @@ RDUnrestrict = Callable[[str], Awaitable[dict[str, Any]]]
 # Language-tag tokens commonly seen in release names. Used so we can
 # distinguish "stream tags a language we don't want" (reject) from
 # "stream tags no language at all" (accept -- usually English by default).
+#
+# Full-word tokens ONLY (no 3-letter codes). Prior versions included
+# "fre"/"spa"/"ger"/"ita"/"por"/"rus"/"jpn"/"kor"/"chi"/"hin", but
+# plain substring matching against title text caused false-positive
+# drops on English words like "Free" / "Frequency" / "Capital" /
+# "Crusher" / "Shine". Also dropped: "multi" and "dual" -- those are
+# AUDIO-multiplicity markers (almost always include English), not
+# single foreign-language tags. A future improvement could
+# reintroduce the 3-letter codes via word-boundary regex matching
+# (e.g., r"\b(fre|spa|ger|...)\b") to catch bracketed `[FRE]` tags
+# without snagging "Free"; out of scope for v1.
 _LANG_TOKENS: tuple[str, ...] = (
     "english",
     "french",
@@ -50,18 +111,6 @@ _LANG_TOKENS: tuple[str, ...] = (
     "chinese",
     "hindi",
     "dubbed",
-    "multi",
-    "dual",
-    "fre",
-    "spa",
-    "ger",
-    "ita",
-    "por",
-    "rus",
-    "jpn",
-    "kor",
-    "chi",
-    "hin",
 )
 
 # Media-file extensions used to identify the real-filename line inside a
@@ -86,7 +135,29 @@ def _filter_streams(
     preferred_languages: list[str],
     exclude_quality: list[str],
 ) -> list[dict[str, Any]]:
-    """Apply language + quality filters; keep streams with no language tag."""
+    """Apply language + quality filters; keep streams with no language tag.
+
+    Language heuristic (three branches per stream):
+
+    1. Stream's ``title`` + ``name`` contains at least one preferred
+       language token (case-insensitive substring) -> keep.
+    2. Stream's blob contains any token from :data:`_LANG_TOKENS` but
+       NOT a preferred one -> drop (foreign release explicitly tagged).
+    3. Stream's blob contains no language tag at all -> keep
+       (untagged releases are usually English by default; better to
+       attempt than to silently drop).
+
+    Quality heuristic: case-insensitive substring exclusion against
+    the same blob. Streams matching ANY token in ``exclude_quality``
+    are dropped. No substitution / regex; ``"CAM"`` would also match
+    ``"webcam"`` if such a release tag existed.
+
+    Pure function: takes a list, returns a new list with the same
+    dict references. Does not mutate the input LIST or the per-stream
+    DICTS, but downstream mutation of a kept dict will also mutate
+    the input (shallow reference, not deep copy). Use ``copy.deepcopy``
+    at the call site if you need true isolation.
+    """
     out: list[dict[str, Any]] = []
     for s in raw_streams:
         title_blob_lower = ((s.get("title") or "") + " " + (s.get("name") or "")).lower()
@@ -106,7 +177,42 @@ def _overlay_cache_and_risk(
     cache_map: dict[str, dict[str, Any]],
     learner: FilterGateLearner,
 ) -> None:
-    """Mutate each candidate dict with `_cached`, `_filter_gate_risk`, `_filename`."""
+    """Mutate each candidate dict IN-PLACE with three derived fields.
+
+    Side effect: returns ``None`` and mutates ``candidates`` directly.
+    Fields added to each dict (underscore-prefixed to mark them as
+    composer-internal vs addon-supplied):
+
+    - ``_cached`` (bool): from ``cache_map[infoHash]["cached"]``.
+      Streams whose ``infoHash`` is absent from ``cache_map`` (e.g.,
+      the addon didn't ship an ``infoHash`` field, or RD's cache check
+      returned nothing for it) get ``False`` -- sorted as uncached.
+    - ``_filter_gate_risk`` (str): the ``.value`` of the
+      :class:`RiskLevel` returned by
+      :meth:`FilterGateLearner.predict_risk` for the extracted
+      filename. :class:`RiskLevel` is ternary (``UNKNOWN`` / ``LOW`` /
+      ``HIGH``); ``MEDIUM`` is reserved-but-unused in v1. Note that
+      empty / ``None`` filenames return ``UNKNOWN``, which sorts as
+      not-HIGH and is attempted unconditionally in
+      :func:`_try_candidate` -- the assumption is that unknown is
+      benign (better to attempt and possibly burn one RD call than
+      to silently skip). Computed ONCE here at the cache-overlay step;
+      the candidate loop in :func:`_try_candidate` reads this cached
+      field via ``candidate.get("_filter_gate_risk")`` rather than
+      re-invoking the learner. FastMCP's per-session serialization
+      means no concurrent strike-learning can mutate the learner
+      between the cache step and the loop, so the snapshot is fresh
+      enough for the duration of one composer call. If
+      :func:`_overlay_cache_and_risk` is ever modified to skip
+      candidates, the missing ``_filter_gate_risk`` field would cause
+      :func:`_try_candidate` to treat them as not-HIGH (since
+      ``None != "high"``) and attempt them unconditionally -- worth
+      noting if that optimization is ever made.
+    - ``_filename`` (str | None): extracted via
+      :func:`_extract_filename`. ``None`` if no filename could be
+      determined; downstream :meth:`record_strike_and_persist` receives
+      ``""`` in that case and learns nothing.
+    """
     for c in candidates:
         h = c.get("infoHash") or ""
         c["_cached"] = bool(cache_map.get(h, {}).get("cached", False))
@@ -121,10 +227,25 @@ def _handle_unrestrict_exception(
     candidate: dict[str, Any],
     learner: FilterGateLearner,
 ) -> Attempt:
-    """Build an Attempt from a MaestroException raised by rd_unrestrict.
+    """Build an :class:`Attempt` row from a failed ``rd_unrestrict`` call.
 
-    Side effect: on infringing_file, persists a filter-gate strike via the
-    CF10 wrapper (atomic record + save).
+    Two branches based on whether the error body contains
+    ``infringing_file``:
+
+    - **Infringing**: returns ``Attempt(status="unrestrict_403_infringing")``
+      AND triggers a side effect:
+      :meth:`FilterGateLearner.record_strike_and_persist` learns the
+      filename's tokens for future risk prediction. If the candidate
+      has no extractable filename (``_filename is None``), the strike
+      records as ``""`` (no tokens learned, but the call still completes
+      cleanly -- no exception escapes).
+    - **Other 4xx**: returns ``Attempt(status="unrestrict_4xx")`` with
+      no side effect; the failure was a non-filter-gate condition (auth,
+      rate limit, malformed response) and the learner has nothing to
+      learn from it.
+
+    The ``error`` field is the first 200 chars of ``str(exc)`` -- enough
+    for diagnostics without bloating the response payload.
     """
     err_str = str(exc).lower()
     filename = candidate.get("_filename")
@@ -166,7 +287,74 @@ async def find_best_stream(
     rd_unrestrict: RDUnrestrict,
     budget_s: float,
 ) -> StreamResolution:
-    """The composer. Returns one playable URL or a structured failure."""
+    """Resolve a title to one playable RD URL or a structured failure.
+
+    See module docstring for the 7-step chain overview. This function
+    is the orchestrator; helpers do the per-step work.
+
+    Parameter contract:
+
+    - ``title`` + ``content_type``: passed to ``cinemeta_search`` for
+      title -> IMDB id resolution. ``content_type`` is ``"movie"`` or
+      ``"series"``; the addon protocol uses it in the request path.
+    - ``season`` / ``episode``: required for ``"series"``, ignored for
+      ``"movie"``. Both must be set together or neither (the addon
+      query handler treats either-but-not-both as "movie" mode).
+    - ``preferred_languages``: list of language tokens; see
+      :func:`_filter_streams` for the three-branch heuristic.
+    - ``exclude_quality``: list of release-tag tokens; case-insensitive
+      substring excluded from candidates.
+    - ``require_cached``: when ``True`` AND ``fallback_to_uncached`` is
+      ``False``, uncached candidates are filtered out before the
+      candidate loop. When ``False``, all candidates remain (cached
+      first per sort).
+    - ``fallback_to_uncached``: **does double duty**. When ``True``:
+      (a) the ``require_cached`` filter is BYPASSED so uncached
+      candidates stay in the list; AND (b) HIGH-filter-gate-risk
+      candidates are ATTEMPTED rather than pre-skipped (see
+      :func:`_try_candidate`). Callers cannot currently express
+      "uncached OK, but skip HIGH risk" in v1.
+    - ``aiostreams_addon_url``: passed verbatim to ``stremio_query``;
+      the composer doesn't normalize or validate it (the Stremio
+      client does that at the boundary).
+    - ``learner``: shared :class:`FilterGateLearner` instance; mutated
+      by :meth:`record_strike_and_persist` calls on infringing-file
+      failures (the persistence target lives on the learner).
+    - ``cinemeta_search``: best-effort; returns ``None`` for both "no
+      matches" and "Cinemeta is down." The composer can't distinguish
+      these two cases and treats both as "no matches" (returning a
+      structured failure with suggestion = "Cinemeta returned no
+      matches; pass imdb_id directly if you have it").
+    - ``stremio_query``: ``MaestroException`` from this call is NOT
+      caught -- it propagates out of the composer. Justified because
+      a failed AIOStreams query means we have no candidates to work
+      with, and the caller's middleware will translate the exception
+      to an MCP error response.
+    - ``rd_check_cache``: only called if at least one candidate has
+      a non-empty ``infoHash``. Streams without ``infoHash`` are still
+      attempted but sort as uncached. **Exceptions propagate out of
+      the composer** (unlike ``rd_unrestrict`` exceptions, which are
+      caught per-candidate); a transient RD outage during cache check
+      aborts the entire call. MCP middleware translates the propagated
+      ``MaestroException`` to a structured error response. Callers
+      needing graceful degradation (proceed with ``_cached=False`` for
+      all candidates on cache-check failure) should wrap the call
+      externally.
+    - ``rd_unrestrict``: called once per candidate during the retry
+      loop. Exceptions are caught and converted to ``Attempt`` rows;
+      see :func:`_handle_unrestrict_exception`.
+    - ``budget_s``: wall-clock budget in seconds, checked BEFORE each
+      candidate (NOT during ``rd_unrestrict`` execution). A single
+      slow upstream call can exceed ``budget_s``.
+
+    Sort stability: within (cached, risk) groups the upstream
+    AIOStreams ordering is preserved (Python's sort is stable). The
+    addon's quality ranking flows through unchanged.
+
+    Return shape (see :class:`StreamResolution`): success envelope
+    with ``url`` set OR structured failure with ``url=None``,
+    ``attempts`` populated, and ``suggestion`` naming the next action.
+    """
 
     start = time.monotonic()
     attempts: list[Attempt] = []
@@ -258,7 +446,34 @@ async def _try_candidate(
     rd_unrestrict: RDUnrestrict,
     fallback_to_uncached: bool,
 ) -> StreamResolution | None:
-    """Process one candidate: append an Attempt; return success resolution or None."""
+    """Evaluate one candidate; append an :class:`Attempt`; return success or ``None``.
+
+    Side effect: always appends exactly ONE :class:`Attempt` to
+    ``attempts`` (regardless of return). Returning ``StreamResolution``
+    triggers an early-exit from the candidate loop; returning ``None``
+    signals "try the next candidate."
+
+    Branch logic (in order):
+
+    1. **HIGH filter-gate risk + no fallback**: when
+       ``candidate["_filter_gate_risk"] == "high"`` AND
+       ``fallback_to_uncached`` is ``False``, the candidate is
+       pre-skipped with ``status="filter_gate_block"``. NOTE:
+       ``fallback_to_uncached`` here gates filter-gate bypass, not
+       just uncached fallback -- the flag does double duty (see
+       :func:`find_best_stream` docstring).
+    2. **No URL**: ``candidate["url"]`` missing/falsy -> ``status="no_url"``.
+    3. **``rd_unrestrict`` raised**: caught + converted to an
+       ``Attempt`` row via :func:`_handle_unrestrict_exception`
+       (which may also trigger a filter-gate strike learn).
+    4. **``rd_unrestrict`` returned but no ``download`` field**:
+       ``status="no_url"`` with error explaining the source. Distinct
+       from branch 2 because the URL existed in the addon response but
+       RD returned no playable form.
+    5. **Success**: ``status="success"`` appended AND a populated
+       :class:`StreamResolution` returned. The success ``Attempt``
+       is always the last row in ``attempts``.
+    """
     hash_ = candidate.get("infoHash")
     filename = candidate.get("_filename")
     title_blob = candidate.get("title") or candidate.get("name") or ""
@@ -354,6 +569,25 @@ def _extract_filename(stream: dict[str, Any]) -> str | None:
 
 
 def _build_metadata(stream: dict[str, Any]) -> StreamMetadata:
+    """Build a :class:`StreamMetadata` from heuristic title-blob inspection.
+
+    Three substring checks against the lower-cased ``title`` + ``name``:
+
+    - **Resolution**: first match of ``4k`` / ``1080p`` / ``720p`` /
+      ``480p``. ``None`` if no match.
+    - **Codec**: first match of ``x265`` / ``x264`` / ``av1`` / ``hevc``.
+      ``None`` if no match.
+    - **Language**: ``"English"`` iff ``"english"`` substring present;
+      ``None`` otherwise. NOT a real language detector -- foreign
+      releases that tag e.g. ``"French"`` will report ``language=None``
+      here even though the stream is clearly French.
+
+    ``size_gb`` and ``group`` are always ``None`` in v1 (not yet
+    extracted). ``source_addon`` is hardcoded ``"aiostreams"`` since
+    that's the only upstream the composer consults.
+
+    Pure function; called once on the winning candidate.
+    """
     title_blob = ((stream.get("title") or "") + " " + (stream.get("name") or "")).lower()
     resolution = next((r for r in ("4k", "1080p", "720p", "480p") if r in title_blob), None)
     codec = next((c for c in ("x265", "x264", "av1", "hevc") if c in title_blob), None)
