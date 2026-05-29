@@ -12,10 +12,11 @@ matching a conservative sensitive-suffix regex is present in the tuple.
 
 Coverage boundary (the material one): this test walks only TOP-LEVEL
 `UserDataSchema.model_fields`. It does NOT recurse, so it gives zero guard
-over the NESTED credential containers the redactor actually hand-codes --
-`services[].credentials` (debrid API keys), `proxy.credentials`, and
-`parentConfig.password`. If upstream renames a nested credential key, the
-redactor silently no-ops AND this test stays green. (The suffix regex is a
+over the NESTED credential containers: `services[].credentials` (debrid API
+keys) and `proxy.credentials` -- which the redactor DOES hand-code -- plus
+`parentConfig.password`, which it does NOT (an unredacted gap). If upstream
+renames a hand-coded nested key, the redactor silently no-ops AND this test
+stays green. (The suffix regex is a
 secondary, top-level-only limit; widening it does NOT close the structural
 nesting gap.) A recursive nested-credential walker -- plus the
 `parentConfig.password` redaction fix it would expose -- is tracked as a

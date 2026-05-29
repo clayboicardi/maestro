@@ -24,7 +24,9 @@ from pathlib import Path
 
 import pytest
 
-GENERATED = Path(__file__).parents[2] / "src" / "maestro" / "aiostreams" / "schemas_generated.py"
+GENERATED = (
+    Path(__file__).resolve().parents[2] / "src" / "maestro" / "aiostreams" / "schemas_generated.py"
+)
 PINNED_SHA_FILE = Path(__file__).parent / "schemas_generated.sha256"
 
 pytestmark = pytest.mark.schema_fidelity

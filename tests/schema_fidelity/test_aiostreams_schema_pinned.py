@@ -81,9 +81,9 @@ def test_pin_locations_are_synchronized() -> None:
     PINNED_TAG by the test above.) Nothing else ties these together, so a
     partial re-pin would otherwise pass green with a stale generated module.
     """
-    repo_root = Path(__file__).parents[2]
+    repo_root = Path(__file__).resolve().parents[2]
     script = (repo_root / "scripts" / "regen_aiostreams_schemas.sh").read_text(encoding="utf-8")
-    script_match = re.search(r'^PINNED_TAG="([^"]+)"', script, re.MULTILINE)
+    script_match = re.search(r"^PINNED_TAG=['\"]([^'\"]+)['\"]", script, re.MULTILINE)
     assert script_match, "PINNED_TAG not found in regen script"
     assert script_match.group(1) == PINNED_TAG, (
         f"regen script PINNED_TAG ({script_match.group(1)!r}) != test PINNED_TAG ({PINNED_TAG!r})"
@@ -92,7 +92,7 @@ def test_pin_locations_are_synchronized() -> None:
     generated = (repo_root / "src" / "maestro" / "aiostreams" / "schemas_generated.py").read_text(
         encoding="utf-8"
     )
-    header_match = re.search(r"AIOStreams@(v\d+(?:\.\d+)+)", generated)
+    header_match = re.search(r"AIOStreams@(v\d+(?:\.\d+)+(?:-[a-zA-Z0-9.-]+)?)", generated)
     assert header_match, "provenance header @vX.Y.Z not found in schemas_generated.py"
     assert header_match.group(1) == PINNED_TAG, (
         f"schemas_generated.py was built from {header_match.group(1)!r} "
