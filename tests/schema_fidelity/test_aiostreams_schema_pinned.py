@@ -1,9 +1,20 @@
-"""Detect upstream AIOStreams schema drift.
+"""Pinned-tag content-integrity check for the AIOStreams schema source.
 
-This test fetches the live schemas.ts at our pinned tag and compares
-its SHA256 against the value we recorded at last regen. Drift = run
-scripts/regen_aiostreams_schemas.sh and review the diff before bumping
-the pin.
+Fetches the live schemas.ts AT THE PINNED TAG and compares its SHA256
+against the value recorded at last regen. Because a git tag is normally
+immutable, this primarily detects the supply-chain case -- upstream
+re-pointing the tag to different content (tamper / force-retag) -- NOT
+upstream's ongoing schema evolution (catching that would require comparing
+against a moving ref like the default branch). A mismatch means: re-verify
+the tag, run scripts/regen_aiostreams_schemas.sh, and review the diff.
+
+Pin-sync caveat: ``PINNED_TAG`` below is an INDEPENDENT duplicate of the one
+in scripts/regen_aiostreams_schemas.sh. Re-pinning must update BOTH (plus
+the .sha256 file); nothing enforces that they agree today.
+
+Network: this test makes a live GitHub fetch and is NOT excluded from the
+default suite (unlike ``smoke``), so the CI gate depends on GitHub being
+reachable at run time.
 """
 
 from __future__ import annotations

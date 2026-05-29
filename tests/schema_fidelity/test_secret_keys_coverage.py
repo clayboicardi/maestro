@@ -1,15 +1,20 @@
 """Schema-fidelity guard: `_TOP_LEVEL_SECRET_KEYS` must cover every sensitive
 UserDataSchema top-level field.
 
-R-1 from PR #7's /octo:review (claude+gemini+codex) cycle: the
-`_TOP_LEVEL_SECRET_KEYS` tuple in `src/maestro/aiostreams/tools.py` is a
-manually-maintained list. If AIOStreams upstream adds a new
-credential-bearing top-level field (e.g. `sonarrApiKey`, `traktApiKey`,
-`<new_provider>AccessToken`) on the next regen, the field will ship
-unredacted through every MCP read path until someone manually extends
-the tuple. This test closes that drift gap by walking
-`UserDataSchema.model_fields` and asserting every field name matching a
-conservative sensitive-suffix regex is present in the tuple.
+An earlier security review flagged that the `_TOP_LEVEL_SECRET_KEYS` tuple
+in `src/maestro/aiostreams/tools.py` is a manually-maintained list. If
+AIOStreams upstream adds a new credential-bearing top-level field (e.g.
+`sonarrApiKey`, `traktApiKey`, `<new_provider>AccessToken`) on the next
+regen, the field will ship unredacted through every MCP read path until
+someone manually extends the tuple. This test closes that drift gap by
+walking `UserDataSchema.model_fields` and asserting every field name
+matching a conservative sensitive-suffix regex is present in the tuple.
+
+Coverage boundary: the regex matches only the listed suffixes (api_key /
+access_token / password / secret / token). A future credential field named
+outside that set -- e.g. `*Bearer`, `*Credential`, or a bare `auth` -- would
+NOT be flagged and could ship unredacted. Widen `_SENSITIVE_SUFFIX_RE` if
+upstream introduces such a naming.
 
 If this test fails after a schema regen, extend the tuple in
 `src/maestro/aiostreams/tools.py`.
