@@ -1,0 +1,8 @@
+version: 2
+updates:
+  # Keep the SHA-pinned GitHub Actions current (ci.yaml + smoke.yaml). Dependabot
+  # opens PRs that bump the pinned SHA + the trailing `# vX.Y.Z` comment together.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
