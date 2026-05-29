@@ -10,17 +10,20 @@ someone manually extends the tuple. This test closes that drift gap by
 walking `UserDataSchema.model_fields` and asserting every field name
 matching a conservative sensitive-suffix regex is present in the tuple.
 
-Coverage boundary (the material one): this test walks only TOP-LEVEL
-`UserDataSchema.model_fields`. It does NOT recurse, so it gives zero guard
-over the NESTED credential containers: `services[].credentials` (debrid API
-keys) and `proxy.credentials` -- which the redactor DOES hand-code -- plus
-`parentConfig.password`, which it does NOT (an unredacted gap). If upstream
-renames a hand-coded nested key, the redactor silently no-ops AND this test
-stays green. (The suffix regex is a
-secondary, top-level-only limit; widening it does NOT close the structural
-nesting gap.) A recursive nested-credential walker -- plus the
-`parentConfig.password` redaction fix it would expose -- is tracked as a
-dedicated follow-up.
+This module guards secret coverage at two levels:
+
+1. `test_top_level_secret_keys_covers_schema_sensitive_fields` -- every
+   TOP-LEVEL UserDataSchema field with a sensitive-suffix name must appear in
+   `_TOP_LEVEL_SECRET_KEYS`.
+2. `test_no_unhandled_nested_sensitive_fields` -- every NESTED sensitive-suffix
+   field (any depth) must be a known redactor-handled path. As of v2.29.6,
+   `parentConfig.password` is the only one, and `_redact_secrets` now redacts it.
+
+Known limit: neither walk sees DYNAMIC dict keys (e.g. `presets[].options`,
+typed `dict[str, Any]`). Those are owned by `_redact_secrets` directly via
+`_SENSITIVE_OPTION_KEY_RE` key-matching. The credential CONTAINERS
+(`services[].credentials`, `proxy.credentials`) are named "credentials" -- not a
+sensitive suffix -- and are likewise handled by the redactor by container name.
 
 If this test fails after a schema regen, extend the tuple in
 `src/maestro/aiostreams/tools.py`.

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Awaitable, Callable
 from copy import deepcopy
 from typing import Any
@@ -20,6 +21,10 @@ from maestro.aiostreams.templates import (
 log = structlog.get_logger("maestro.aiostreams.tools")
 
 REDACTED = "***REDACTED***"
+
+# Sensitive-suffix matcher for DYNAMIC dict keys (e.g. preset options) the schema
+# can't enumerate. Mirrors tests/schema_fidelity/test_secret_keys_coverage's regex.
+_SENSITIVE_OPTION_KEY_RE = re.compile(r"(?i)(api_?key|access_?token|password|secret|token)$")
 
 # Top-level config keys carrying sensitive values that callers must not
 # surface through MCP tool reads unless include_secrets=True. Sourced
@@ -54,10 +59,28 @@ _RESOLUTION_LADDER: list[str] = [
 ]
 
 
+def _redact_preset_options(presets: object) -> None:
+    """Redact sensitive-named keys in each preset's dynamic ``options`` dict (in place).
+
+    ``presets[].options`` is a ``dict[str, Any]`` whose keys aren't in the schema,
+    so values under keys matching :data:`_SENSITIVE_OPTION_KEY_RE`
+    (apiKey/token/password/secret) are redacted; other option values are kept.
+    Non-list ``presets`` / non-dict entries / null options are safe no-ops.
+    """
+    if not isinstance(presets, list):
+        return
+    for preset in presets:
+        options = preset.get("options") if isinstance(preset, dict) else None
+        if isinstance(options, dict):
+            for opt_key in options:
+                if options[opt_key] is not None and _SENSITIVE_OPTION_KEY_RE.search(opt_key):
+                    options[opt_key] = REDACTED
+
+
 def _redact_secrets(config: dict[str, Any]) -> dict[str, Any]:
     """Return a deepcopy of ``config`` with sensitive values redacted.
 
-    AIOStreams stores sensitive material in four places per the upstream
+    AIOStreams stores sensitive material in five places per the upstream
     UserDataSchema (see :mod:`maestro.aiostreams.schemas_generated`):
 
     1. ``services[].credentials`` -- a ``dict[str, str]`` keyed by
@@ -85,6 +108,11 @@ def _redact_secrets(config: dict[str, Any]) -> dict[str, Any]:
        upstream ``ParentConfig`` schema. Unlike the credential
        *containers* above, its field name (``password``) is a plain
        sensitive scalar one level down; redacted in place when present.
+    5. ``presets[].options`` -- a DYNAMIC ``dict[str, Any]`` of addon-specific
+       options that may carry per-addon credentials. Schema introspection
+       cannot enumerate the dynamic keys, so values under keys matching
+       :data:`_SENSITIVE_OPTION_KEY_RE` (apiKey/token/password/secret) are
+       redacted; non-sensitive option values are preserved.
 
     Any read path that surfaces config through an MCP tool MUST call
     this redactor unless the caller has explicitly opted into
@@ -142,6 +170,10 @@ def _redact_secrets(config: dict[str, Any]) -> dict[str, Any]:
     if isinstance(parent, dict) and parent.get("password") is not None:
         parent["password"] = REDACTED
 
+    # Preset options: dynamic dict[str, Any] the schema can't enumerate
+    # (extracted to a helper to keep _redact_secrets within the branch limit).
+    _redact_preset_options(out.get("presets"))
+
     return out
 
 
@@ -185,9 +217,12 @@ class AIOStreamsToolset:
         return _redact_secrets(cfg).get("services", [])
 
     async def get_addons(self) -> list[dict[str, Any]]:
-        """List aggregated addons with enabled state + URLs."""
+        """List aggregated addons with enabled state + URLs (redacted read path)."""
         cfg = await self._get_config()
-        return cfg.get("addons", [])
+        # Mirror get_services: route through the redactor. v2.29.6 UserDataSchema
+        # has no top-level `addons` field (extra="forbid"), so this is [] today;
+        # the redactor pass future-proofs the read path if upstream adds one.
+        return _redact_secrets(cfg).get("addons", [])
 
     async def get_filters(self) -> dict[str, Any]:
         """Return current filter settings (language, quality, resolution, etc)."""

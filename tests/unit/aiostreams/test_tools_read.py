@@ -228,3 +228,33 @@ def test_redact_secrets_handles_missing_or_null_parent_config() -> None:
     """Absent or null parentConfig is a safe no-op (no KeyError / TypeError)."""
     assert "parentConfig" not in _redact_secrets({"tmdbApiKey": "x"})
     assert _redact_secrets({"parentConfig": None})["parentConfig"] is None
+
+
+def test_redact_secrets_redacts_preset_option_secrets() -> None:
+    """Preset options (dynamic dict): values under sensitive-named keys redacted; others kept."""
+    config: dict[str, Any] = {
+        "presets": [
+            {
+                "type": "jackett",
+                "instanceId": "j1",
+                "enabled": True,
+                "options": {
+                    "apiKey": "preset_secret",
+                    "rdToken": "tok_secret",
+                    "url": "https://jackett.example",
+                },
+            }
+        ]
+    }
+    result = _redact_secrets(config)
+    opts = result["presets"][0]["options"]
+    assert opts["apiKey"] == "***REDACTED***"
+    assert opts["rdToken"] == "***REDACTED***"
+    assert opts["url"] == "https://jackett.example"  # non-sensitive option key preserved
+
+
+def test_redact_secrets_handles_presets_without_options() -> None:
+    """Empty presets or null options are safe no-ops."""
+    assert _redact_secrets({"presets": []})["presets"] == []
+    no_opts = _redact_secrets({"presets": [{"type": "x", "options": None}]})
+    assert no_opts["presets"][0]["options"] is None
