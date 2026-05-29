@@ -10,8 +10,19 @@
 #      exported ZodType through Zod 4's built-in `z.toJSONSchema()`
 #   4. pipe JSON Schema into datamodel-code-generator -> Pydantic
 #
-# Bumping: edit PINNED_TAG, run this script, review diff, manually
-# update overlay validators in schemas.py if refinement logic changed.
+# Bumping (3 pin locations must move together; nothing enforces it yet):
+#   1. PINNED_TAG below.
+#   2. PINNED_TAG in tests/schema_fidelity/test_aiostreams_schema_pinned.py
+#      -- an INDEPENDENT duplicate; this script does not share it.
+#   3. tests/schema_fidelity/aiostreams_schema.sha256 -- this script does
+#      NOT regenerate it. Recompute manually from the same upstream file:
+#        curl -sL "https://raw.githubusercontent.com/Viren070/AIOStreams/<TAG>/packages/core/src/db/schemas.ts" \
+#          | sha256sum | cut -c1-64 > tests/schema_fidelity/aiostreams_schema.sha256
+#      (result is LF-terminated, 65 bytes total).
+# Then run this script, review the schemas_generated.py diff, and manually
+# update overlay validators in schemas.py if refinement logic changed --
+# Zod .refine()/.transform() logic does NOT survive the JSON-Schema round
+# trip (see `unrepresentable: "any"` in the extractor below).
 #
 # Notes on the design:
 #   - Upstream uses Zod v4 (`zod@^4.4.3`). `z.enum(arrayConst)` is a
@@ -107,7 +118,7 @@ for (const [name, value] of Object.entries(mod)) {
         exports[name] = z.toJSONSchema(value as ZodType, {
             // Inline everything; datamodel-code-generator handles refs
             // fine but inlining keeps the output module flat and
-            // matches the pinned-tag-diff workflow Clay wants.
+            // matches the pinned-tag-diff review workflow.
             unrepresentable: "any",
         });
     } catch (e) {
