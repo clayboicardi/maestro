@@ -4,11 +4,11 @@ The diagnose domain surfaces three read-only health probes:
 
 - ``diagnose_stack_health`` -- pings each configured addon's manifest
   endpoint; returns per-addon status + latency.
-- ``diagnose_rd_health`` -- verifies RD auth state and reports
-  filter-gate learning counts (known + learned keywords). See
-  :meth:`DiagnoseToolset.rd_health` for the exact meaning of each
-  count -- ``learned_count`` reports tracked candidates, not only the
-  promoted keywords that actually influence risk classification.
+- ``diagnose_rd_health`` -- verifies RD auth state and reports filter-gate
+  learning counts. See :meth:`DiagnoseToolset.rd_health` for the exact
+  meaning of each count -- it distinguishes ``learned_count`` (all tracked
+  candidates) from ``active_learned_count`` (only the promoted keywords
+  that actually influence risk classification).
 - ``diagnose_dud_rate`` -- v1.x stub. Returns ``not_implemented_v1``
   until a persistent telemetry layer lands (see design doc's
   "Open questions deferred to v1.x").
@@ -28,7 +28,7 @@ from fastmcp import FastMCP
 from maestro.annotations import read_only
 from maestro.diagnose.stack_health import probe_all
 from maestro.errors import MaestroException
-from maestro.realdebrid.filter_gate import FilterGateLearner
+from maestro.realdebrid.filter_gate import LEARNED_PROMOTION_THRESHOLD, FilterGateLearner
 
 RDUserInfoFn = Callable[[], Awaitable[dict[str, Any]]]
 
@@ -57,56 +57,66 @@ class DiagnoseToolset:
     async def rd_health(self) -> dict[str, Any]:
         """Verify RD auth + report filter-gate learning state.
 
-        Narrow catch (``MaestroException``) is intentional: ``RDClient``
-        wraps every HTTP-level failure (non-2xx status + transport/timeout
-        errors) in ``MaestroException(AuthError(...))`` or similar, so an
-        unexpected non-MaestroException propagating here would be a genuine
-        bug we want to surface, not swallow.
+        Crash-proofing: a health probe must report status without raising.
+        ``RDClient`` wraps HTTP-level failures (non-2xx status + transport/
+        timeout) in ``MaestroException``, but ``get_user_info`` returns
+        ``response.json()`` un-wrapped, so a 200 response with a bad body
+        can still surface as a raw ``ValueError`` (non-JSON) or a non-dict
+        payload (``null``/list). All three are handled -> graceful
+        ``authenticated=False`` with a short ``error`` token, never a raise.
 
-        Catch boundary (exact): a 200 response whose body fails to parse is
-        NOT an HTTP-level failure -- ``RDClient.get_user_info`` returns
-        ``response.json()`` un-wrapped, so a malformed-but-200 ``/user``
-        body raises a raw ``ValueError`` (``json.JSONDecodeError``) that
-        this ``except MaestroException`` does NOT intercept. That escape is
-        intentional under the "surface genuine upstream contract violations"
-        rule, but it means ``rd_health`` is not crash-proof against a
-        misbehaving upstream returning 200 + non-JSON.
+        Secret hygiene: on a caught ``MaestroException`` the response
+        surfaces the structured ``error.code`` (+ fixed ``suggestion``),
+        NOT ``error.message``. The 4xx-other ``UpstreamError`` message
+        embeds a 200-byte upstream body excerpt that can reflect a bearer
+        token, a credential-bearing URL, or a filename; the ``code`` enum
+        is leak-free. (Redacting the body excerpt at the ``RDClient`` source
+        -- which would also cover the other RD tools -- is tracked as a
+        follow-up; this probe defends its own surface.)
 
-        On a caught ``MaestroException`` the response carries
-        ``e.error.message`` only (not the full structured error). RD error
-        messages are bounded -- they do not echo the bearer token -- so this
-        is safe to surface verbatim.
-
-        ``filter_gate`` counts (see also the module docstring):
+        ``filter_gate`` counts:
 
         - ``known_count`` -- size of the static ``KNOWN_KEYWORDS`` baseline.
-        - ``learned_count`` -- number of runtime-tracked candidate keywords,
-          INCLUDING sub-threshold ones (evidence ``count`` below
+        - ``learned_count`` / ``learned_keywords`` -- ALL runtime-tracked
+          candidates, including sub-threshold ones (evidence ``count`` below
           :data:`~maestro.realdebrid.filter_gate.LEARNED_PROMOTION_THRESHOLD`)
-          that do NOT yet influence ``predict_risk``. This is a count of
-          what the learner is tracking, not of what is actively gating, so
-          it can exceed the number of promoted keywords.
-        - ``learned_keywords`` -- the candidate keys, same superset as
-          ``learned_count`` (promoted and sub-threshold alike).
+          that do NOT yet influence ``predict_risk``.
+        - ``active_learned_count`` / ``active_learned_keywords`` -- only the
+          promoted candidates (``count`` >= threshold) that actually gate
+          risk classification. Always ``active_learned_count <= learned_count``.
         """
         auth_state: dict[str, Any] = {"authenticated": False}
         if self._rd_get_user_info is not None:
             try:
                 info = await self._rd_get_user_info()
-                auth_state = {
-                    "authenticated": True,
-                    "username": info.get("username"),
-                    "premium": info.get("premium"),
-                }
             except MaestroException as e:
-                auth_state = {"authenticated": False, "error": e.error.message}
+                auth_state = {
+                    "authenticated": False,
+                    "error": e.error.code,
+                    "suggestion": e.error.suggestion,
+                }
+            except ValueError:
+                auth_state = {"authenticated": False, "error": "malformed_user_response"}
+            else:
+                if isinstance(info, dict):
+                    auth_state = {
+                        "authenticated": True,
+                        "username": info.get("username"),
+                        "premium": info.get("premium"),
+                    }
+                else:
+                    auth_state = {"authenticated": False, "error": "malformed_user_response"}
         state = self._learner.export_state()
+        learned = self._learner.learned_keywords
+        active = sorted(kw for kw, ev in learned.items() if ev.count >= LEARNED_PROMOTION_THRESHOLD)
         return {
             **auth_state,
             "filter_gate": {
                 "known_count": len(state["known_keywords"]),
-                "learned_count": len(self._learner.learned_keywords),
-                "learned_keywords": list(self._learner.learned_keywords.keys()),
+                "learned_count": len(learned),
+                "learned_keywords": list(learned.keys()),
+                "active_learned_count": len(active),
+                "active_learned_keywords": active,
             },
         }
 
