@@ -10,11 +10,16 @@ someone manually extends the tuple. This test closes that drift gap by
 walking `UserDataSchema.model_fields` and asserting every field name
 matching a conservative sensitive-suffix regex is present in the tuple.
 
-Coverage boundary: the regex matches only the listed suffixes (api_key /
-access_token / password / secret / token). A future credential field named
-outside that set -- e.g. `*Bearer`, `*Credential`, or a bare `auth` -- would
-NOT be flagged and could ship unredacted. Widen `_SENSITIVE_SUFFIX_RE` if
-upstream introduces such a naming.
+Coverage boundary (the material one): this test walks only TOP-LEVEL
+`UserDataSchema.model_fields`. It does NOT recurse, so it gives zero guard
+over the NESTED credential containers the redactor actually hand-codes --
+`services[].credentials` (debrid API keys), `proxy.credentials`, and
+`parentConfig.password`. If upstream renames a nested credential key, the
+redactor silently no-ops AND this test stays green. (The suffix regex is a
+secondary, top-level-only limit; widening it does NOT close the structural
+nesting gap.) A recursive nested-credential walker -- plus the
+`parentConfig.password` redaction fix it would expose -- is tracked as a
+dedicated follow-up.
 
 If this test fails after a schema regen, extend the tuple in
 `src/maestro/aiostreams/tools.py`.
