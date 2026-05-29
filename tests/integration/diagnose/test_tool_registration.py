@@ -60,6 +60,9 @@ async def test_diagnose_annotation_types_correct() -> None:
         assert ann.destructiveHint is False, (
             f"{name}: expected destructiveHint=False, got {ann.destructiveHint}"
         )
+        assert ann.idempotentHint is False, (
+            f"{name}: expected idempotentHint=False, got {ann.idempotentHint}"
+        )
 
 
 async def test_total_tool_count_is_45() -> None:
