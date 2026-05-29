@@ -1,15 +1,26 @@
 """Schema-fidelity guard: `_TOP_LEVEL_SECRET_KEYS` must cover every sensitive
 UserDataSchema top-level field.
 
-R-1 from PR #7's /octo:review (claude+gemini+codex) cycle: the
-`_TOP_LEVEL_SECRET_KEYS` tuple in `src/maestro/aiostreams/tools.py` is a
-manually-maintained list. If AIOStreams upstream adds a new
-credential-bearing top-level field (e.g. `sonarrApiKey`, `traktApiKey`,
-`<new_provider>AccessToken`) on the next regen, the field will ship
-unredacted through every MCP read path until someone manually extends
-the tuple. This test closes that drift gap by walking
-`UserDataSchema.model_fields` and asserting every field name matching a
-conservative sensitive-suffix regex is present in the tuple.
+An earlier security review flagged that the `_TOP_LEVEL_SECRET_KEYS` tuple
+in `src/maestro/aiostreams/tools.py` is a manually-maintained list. If
+AIOStreams upstream adds a new credential-bearing top-level field (e.g.
+`sonarrApiKey`, `traktApiKey`, `<new_provider>AccessToken`) on the next
+regen, the field will ship unredacted through every MCP read path until
+someone manually extends the tuple. This test closes that drift gap by
+walking `UserDataSchema.model_fields` and asserting every field name
+matching a conservative sensitive-suffix regex is present in the tuple.
+
+Coverage boundary (the material one): this test walks only TOP-LEVEL
+`UserDataSchema.model_fields`. It does NOT recurse, so it gives zero guard
+over the NESTED credential containers: `services[].credentials` (debrid API
+keys) and `proxy.credentials` -- which the redactor DOES hand-code -- plus
+`parentConfig.password`, which it does NOT (an unredacted gap). If upstream
+renames a hand-coded nested key, the redactor silently no-ops AND this test
+stays green. (The suffix regex is a
+secondary, top-level-only limit; widening it does NOT close the structural
+nesting gap.) A recursive nested-credential walker -- plus the
+`parentConfig.password` redaction fix it would expose -- is tracked as a
+dedicated follow-up.
 
 If this test fails after a schema regen, extend the tuple in
 `src/maestro/aiostreams/tools.py`.

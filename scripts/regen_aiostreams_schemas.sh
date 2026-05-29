@@ -10,8 +10,20 @@
 #      exported ZodType through Zod 4's built-in `z.toJSONSchema()`
 #   4. pipe JSON Schema into datamodel-code-generator -> Pydantic
 #
-# Bumping: edit PINNED_TAG, run this script, review diff, manually
-# update overlay validators in schemas.py if refinement logic changed.
+# Bumping (3 pin locations must move together; nothing enforces it yet):
+#   1. PINNED_TAG below.
+#   2. PINNED_TAG in tests/schema_fidelity/test_aiostreams_schema_pinned.py
+#      -- an INDEPENDENT duplicate; this script does not share it.
+#   3. tests/schema_fidelity/aiostreams_schema.sha256 -- this script does
+#      NOT regenerate it. Recompute manually from the same upstream file:
+#        curl -fsSL "https://raw.githubusercontent.com/Viren070/AIOStreams/<TAG>/packages/core/src/db/schemas.ts" \
+#          | sha256sum | cut -c1-64 > tests/schema_fidelity/aiostreams_schema.sha256
+#      (result is LF-terminated, 65 bytes total).
+# Then run this script, review the schemas_generated.py diff, and manually
+# update overlay validators in schemas.py if refinement logic changed --
+# Zod .refine()/.transform() logic does NOT survive the JSON-Schema round
+# trip (z.toJSONSchema drops refinements entirely; the separate
+# `unrepresentable: "any"` option below only maps unrepresentable TYPES).
 #
 # Notes on the design:
 #   - Upstream uses Zod v4 (`zod@^4.4.3`). `z.enum(arrayConst)` is a
@@ -39,7 +51,9 @@ WORK_DIR="$(mktemp -d)"
 trap '[[ -n "${WORK_DIR:-}" ]] && rm -rf "$WORK_DIR"' EXIT
 
 echo "[regen] cloning ${REPO_URL}@${PINNED_TAG} into ${WORK_DIR}"
-git clone --depth=1 --branch "$PINNED_TAG" "$REPO_URL" "$WORK_DIR/AIOStreams" >/dev/null 2>&1
+# Keep stderr (only stdout is silenced): a bad tag / network failure must
+# surface its cause, not abort with a bare exit 128 under `set -e`.
+git clone --depth=1 --branch "$PINNED_TAG" "$REPO_URL" "$WORK_DIR/AIOStreams" >/dev/null
 
 SOURCE_TS="$WORK_DIR/AIOStreams/$SCHEMA_PATH"
 CONSTANTS_TS="$WORK_DIR/AIOStreams/$CONSTANTS_PATH"
@@ -78,8 +92,8 @@ cat > "$EXTRACT/package.json" <<'JSON'
   "version": "0.0.0",
   "type": "module",
   "dependencies": {
-    "zod": "^4.4.3",
-    "tsx": "^4.21.0"
+    "zod": "4.4.3",
+    "tsx": "4.21.0"
   }
 }
 JSON
@@ -107,7 +121,7 @@ for (const [name, value] of Object.entries(mod)) {
         exports[name] = z.toJSONSchema(value as ZodType, {
             // Inline everything; datamodel-code-generator handles refs
             // fine but inlining keeps the output module flat and
-            // matches the pinned-tag-diff workflow Clay wants.
+            // matches the pinned-tag-diff review workflow.
             unrepresentable: "any",
         });
     } catch (e) {
@@ -135,6 +149,21 @@ const root = {
 
 if (skipped.length > 0) {
     console.error(`[extract] skipped ${skipped.length} export(s): ${skipped.join(", ")}`);
+}
+
+// Sentinel: a successful extraction MUST yield schemas (and UserDataSchema
+// specifically). Without this, a future Zod-internals rename could make every
+// schema fail the isZodSchema gate, emit empty $defs, let datamodel-codegen
+// produce a valid-but-empty module, and the script exit 0 -- a silent footgun.
+// Fail loud instead.
+const extractedNames = Object.keys(exports);
+if (extractedNames.length === 0) {
+    console.error("[extract] FATAL: zero schemas extracted (Zod internals may have changed)");
+    process.exit(1);
+}
+if (!("UserDataSchema" in exports)) {
+    console.error("[extract] FATAL: UserDataSchema not extracted (export shape changed)");
+    process.exit(1);
 }
 console.log(JSON.stringify(root, null, 2));
 TS
@@ -173,10 +202,14 @@ if [[ -s "$WORK_DIR/extract.err" ]]; then
 fi
 
 echo "[regen] generating Pydantic models via datamodel-code-generator"
+# Caveat: --reuse-model + --collapse-root-models can collapse two
+# structurally-identical top-level Zod exports into a single Pydantic class,
+# so the "one class per top-level export" mapping holds only for
+# structurally-distinct schemas (true for the current schema set).
 # Use ruff formatters (instead of the default black+isort) so the
 # generated file matches Maestro's `ruff format` style and passes the
 # `ruff format --check .` gate in CI without a follow-up reformat pass.
-uv run --with "datamodel-code-generator[ruff]" datamodel-codegen \
+uv run --with "datamodel-code-generator[ruff]==0.59.0" datamodel-codegen \
     --input "$WORK_DIR/schemas.json" \
     --input-file-type jsonschema \
     --output "$OUT_PY" \

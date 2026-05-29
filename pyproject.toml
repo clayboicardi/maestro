@@ -99,6 +99,7 @@ asyncio_mode = "auto"
 markers = [
     "smoke: live-network tests (opt-in via MAESTRO_SMOKE=1)",
     "schema_fidelity: AIOStreams upstream schema drift detector",
+    "network: makes live network calls; deselect offline with -m \"not network\"",
 ]
 addopts = [
     "-ra",
