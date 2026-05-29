@@ -126,6 +126,33 @@ async def test_probe_all_sanitizes_query_token_from_keys() -> None:
     assert all("SECRET" not in key for key in results)
 
 
+@respx.mock
+@pytest.mark.asyncio
+async def test_probe_all_strips_path_embedded_token_from_keys() -> None:
+    """C-2: a token in the URL PATH (torrentio/RD style) must not surface as a key."""
+    respx.get(url__regex=r"https://addon\.example/.*").mock(
+        return_value=httpx.Response(200, json={"id": "x"})
+    )
+    results = await probe_all(["https://addon.example/realdebrid=RD_SECRET/"], timeout_s=5.0)
+    assert all("RD_SECRET" not in key for key in results)
+    assert "https://addon.example" in results
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_probe_all_same_host_addons_do_not_collide() -> None:
+    """C-1: two configs on the same host both surface (counter-suffix, no silent overwrite)."""
+    respx.get(url__regex=r".*token=BAD.*").mock(return_value=httpx.Response(503))
+    respx.get(url__regex=r".*token=GOOD.*").mock(
+        return_value=httpx.Response(200, json={"id": "ok"})
+    )
+    results = await probe_all(
+        ["https://a.example?token=BAD", "https://a.example?token=GOOD"], timeout_s=5.0
+    )
+    assert len(results) == 2
+    assert sorted(r["status"] for r in results.values()) == ["error", "ok"]
+
+
 @pytest.mark.asyncio
 async def test_probe_all_empty_list() -> None:
     assert await probe_all([], timeout_s=5.0) == {}

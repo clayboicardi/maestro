@@ -20,15 +20,19 @@ spinning up an MCP server.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+import structlog
 from fastmcp import FastMCP
 
 from maestro.annotations import read_only
 from maestro.diagnose.stack_health import probe_all
 from maestro.errors import MaestroException
 from maestro.realdebrid.filter_gate import LEARNED_PROMOTION_THRESHOLD, FilterGateLearner
+
+log = structlog.get_logger("maestro.diagnose.tools")
 
 RDUserInfoFn = Callable[[], Awaitable[dict[str, Any]]]
 
@@ -58,12 +62,20 @@ class DiagnoseToolset:
         """Verify RD auth + report filter-gate learning state.
 
         Crash-proofing: a health probe must report status without raising.
-        ``RDClient`` wraps HTTP-level failures (non-2xx status + transport/
-        timeout) in ``MaestroException``, but ``get_user_info`` returns
-        ``response.json()`` un-wrapped, so a 200 response with a bad body
-        can still surface as a raw ``ValueError`` (non-JSON) or a non-dict
-        payload (``null``/list). All three are handled -> graceful
-        ``authenticated=False`` with a short ``error`` token, never a raise.
+        The ``await`` is wrapped in a tiered catch:
+
+        - ``MaestroException`` -> structured ``error.code`` (see secret
+          hygiene below).
+        - ``json.JSONDecodeError`` -> ``"malformed_user_response"``.
+          ``RDClient.get_user_info`` returns ``response.json()`` un-wrapped,
+          so a 200 with a non-JSON body raises this here.
+        - any other ``Exception`` -> ``"unexpected_error"``, logged to
+          stderr (``exc_info``) so the bug is surfaced, not masked. This is
+          the absolute-crash-proof backstop for a probe whose contract is
+          "never raise"; non-JSON ``ValueError`` s (e.g. a client/config
+          bug) land here rather than being mislabeled malformed-body.
+        - a 200 body that parses but is not a dict (``null``/list) ->
+          ``"malformed_user_response"`` via the ``isinstance`` guard.
 
         Secret hygiene: on a caught ``MaestroException`` the response
         surfaces the structured ``error.code`` (+ fixed ``suggestion``),
@@ -90,16 +102,21 @@ class DiagnoseToolset:
             try:
                 info = await self._rd_get_user_info()
             except MaestroException as e:
-                # Defensive: a health probe must never raise. e.error is a
-                # MaestroError by type, but getattr-with-default keeps the
-                # probe crash-proof even against a degenerate/None payload.
+                # Defensive: e.error is a MaestroError by type, but
+                # getattr-with-default keeps the probe crash-proof even
+                # against a degenerate/None payload. Surface the leak-free
+                # code, never e.error.message (which can embed an upstream
+                # body excerpt with reflected secrets).
                 auth_state = {
                     "authenticated": False,
                     "error": getattr(e.error, "code", "unknown_error"),
                     "suggestion": getattr(e.error, "suggestion", None),
                 }
-            except ValueError:
+            except json.JSONDecodeError:
                 auth_state = {"authenticated": False, "error": "malformed_user_response"}
+            except Exception:
+                log.warning("rd_health_unexpected_error", exc_info=True)
+                auth_state = {"authenticated": False, "error": "unexpected_error"}
             else:
                 if isinstance(info, dict):
                     auth_state = {

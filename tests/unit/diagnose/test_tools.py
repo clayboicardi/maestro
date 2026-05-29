@@ -1,5 +1,6 @@
 """Diagnostic tool tests."""
 
+import json
 from unittest.mock import AsyncMock
 
 import httpx
@@ -92,16 +93,29 @@ async def test_rd_health_non_dict_user_info_degrades(bad: object) -> None:
 
 
 @pytest.mark.asyncio
-async def test_rd_health_value_error_degrades() -> None:
-    """A raw ValueError (bad JSON from get_user_info's un-wrapped .json()) degrades, no raise."""
+async def test_rd_health_json_decode_error_is_malformed() -> None:
+    """A JSONDecodeError (bad body from get_user_info's un-wrapped .json()) -> malformed_user_response."""
     toolset = DiagnoseToolset(
         addon_urls=[],
-        rd_get_user_info=AsyncMock(side_effect=ValueError("Expecting value")),
+        rd_get_user_info=AsyncMock(side_effect=json.JSONDecodeError("x", "doc", 0)),
         learner=FilterGateLearner(state_path=None),
     )
     health = await toolset.rd_health()
     assert health["authenticated"] is False
     assert health["error"] == "malformed_user_response"
+
+
+@pytest.mark.asyncio
+async def test_rd_health_unexpected_error_is_distinct() -> None:
+    """A non-JSON ValueError (client/config bug) -> unexpected_error, not mislabeled malformed (C-3)."""
+    toolset = DiagnoseToolset(
+        addon_urls=[],
+        rd_get_user_info=AsyncMock(side_effect=ValueError("invalid RD client config")),
+        learner=FilterGateLearner(state_path=None),
+    )
+    health = await toolset.rd_health()
+    assert health["authenticated"] is False
+    assert health["error"] == "unexpected_error"
 
 
 @pytest.mark.asyncio

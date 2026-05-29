@@ -19,16 +19,32 @@ from __future__ import annotations
 import asyncio
 import time
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
 from maestro.stremio import normalize_addon_base_url
-from maestro.stremio.client import _compose_addon_url, _sanitize_url_for_message
+from maestro.stremio.client import _compose_addon_url
 
 # HTTP status threshold for "addon manifest probe failed". 4xx/5xx are
 # both classified as ``error`` because either prevents the addon from
 # serving a usable manifest.
 _HTTP_ERROR_THRESHOLD: int = 400
+
+
+def _host_key(url: str) -> str:
+    """Secret-free, collision-tolerant result key for an addon URL.
+
+    Returns ``scheme://host`` only -- path, query, userinfo, and fragment
+    are all dropped, so a token embedded ANYWHERE in the addon URL (query
+    ``?token=`` OR path ``/realdebrid=.../`` as torrentio/RD configs use)
+    never surfaces as a response key. Same-host addons map to the same base
+    key by design; :func:`probe_all` disambiguates them with a counter
+    suffix rather than silently overwriting.
+    """
+    parsed = urlparse(url)
+    host = parsed.hostname or ""
+    return f"{parsed.scheme or 'https'}://{host}" if host else "addon"
 
 
 async def probe_addon(addon_url: str, *, timeout_s: float) -> dict[str, Any]:
@@ -85,16 +101,24 @@ async def probe_addon(addon_url: str, *, timeout_s: float) -> dict[str, Any]:
 
 
 async def probe_all(addon_urls: list[str], *, timeout_s: float) -> dict[str, dict[str, Any]]:
-    """Probe every addon concurrently; key results by a sanitized addon URL.
+    """Probe every addon concurrently; key results by a secret-free host key.
 
-    Keys run through :func:`_sanitize_url_for_message` (drops query string +
-    userinfo + fragment) so a query-auth addon like ``https://x?token=S``
-    does NOT surface ``token=S`` as a dict key in the health response. Two
-    URLs that differ only in stripped components therefore collapse to one
-    key (last-probe-wins) even though each is still probed; pass distinct
-    host/path URLs if per-URL accounting matters. Each ``probe_addon``
-    resolves to a per-addon result dict, so one malformed addon never sinks
-    the gather.
+    Keys are ``scheme://host`` (via :func:`_host_key`) so no token embedded
+    in an addon URL's query OR path can surface as a response key. Distinct
+    addons that share a host (or the same addon configured twice) are
+    disambiguated with a ``" (N)"`` suffix -- results are NEVER silently
+    overwritten, so a failing addon cannot be hidden behind a healthy one
+    with a colliding key. Each ``probe_addon`` resolves to a per-addon
+    result dict, so one malformed addon never sinks the gather.
     """
     results = await asyncio.gather(*(probe_addon(u, timeout_s=timeout_s) for u in addon_urls))
-    return {_sanitize_url_for_message(u): r for u, r in zip(addon_urls, results, strict=True)}
+    out: dict[str, dict[str, Any]] = {}
+    for url, result in zip(addon_urls, results, strict=True):
+        key = _host_key(url)
+        if key in out:
+            n = 2
+            while f"{key} ({n})" in out:
+                n += 1
+            key = f"{key} ({n})"
+        out[key] = result
+    return out
