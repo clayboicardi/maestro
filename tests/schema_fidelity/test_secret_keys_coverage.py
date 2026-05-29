@@ -88,7 +88,9 @@ def _nested_sensitive_field_paths(
     seen = seen if seen is not None else set()
     if model in seen:
         return []
-    seen.add(model)
+    seen = (
+        seen | {model}
+    )  # per-ancestral-path (not shared across siblings) -- blocks cycles without skipping sibling branches
     paths: list[str] = []
     for name, field in model.model_fields.items():
         path = f"{prefix}{name}"
