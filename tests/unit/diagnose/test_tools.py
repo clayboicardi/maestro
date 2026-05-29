@@ -122,6 +122,21 @@ async def test_rd_health_surfaces_error_code_not_leaky_message() -> None:
 
 
 @pytest.mark.asyncio
+async def test_rd_health_degenerate_error_payload_does_not_crash() -> None:
+    """Crash-proof: a MaestroException with a missing error payload degrades, not raises (FF-1)."""
+    exc = MaestroException(UpstreamError(domain="realdebrid"))
+    exc.error = None  # type: ignore[assignment]  # simulate a degenerate payload
+    toolset = DiagnoseToolset(
+        addon_urls=[],
+        rd_get_user_info=AsyncMock(side_effect=exc),
+        learner=FilterGateLearner(state_path=None),
+    )
+    health = await toolset.rd_health()
+    assert health["authenticated"] is False
+    assert health["error"] == "unknown_error"
+
+
+@pytest.mark.asyncio
 async def test_rd_health_splits_candidate_and_active_learned() -> None:
     """learned_count counts all candidates; active_learned_count only promoted (>= threshold)."""
     learner = FilterGateLearner(state_path=None)

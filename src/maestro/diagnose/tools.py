@@ -90,10 +90,13 @@ class DiagnoseToolset:
             try:
                 info = await self._rd_get_user_info()
             except MaestroException as e:
+                # Defensive: a health probe must never raise. e.error is a
+                # MaestroError by type, but getattr-with-default keeps the
+                # probe crash-proof even against a degenerate/None payload.
                 auth_state = {
                     "authenticated": False,
-                    "error": e.error.code,
-                    "suggestion": e.error.suggestion,
+                    "error": getattr(e.error, "code", "unknown_error"),
+                    "suggestion": getattr(e.error, "suggestion", None),
                 }
             except ValueError:
                 auth_state = {"authenticated": False, "error": "malformed_user_response"}
