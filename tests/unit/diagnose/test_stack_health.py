@@ -154,5 +154,21 @@ async def test_probe_all_same_host_addons_do_not_collide() -> None:
 
 
 @pytest.mark.asyncio
+async def test_probe_addon_malformed_url_is_error_not_raise() -> None:
+    """H1: a URL that makes urlparse raise (in normalize/compose) degrades to error, not a crash."""
+    result = await probe_addon("https://[::1/manifest.json", timeout_s=5.0)
+    assert result["status"] == "error"
+    assert "latency_ms" in result
+
+
+@pytest.mark.asyncio
+async def test_probe_all_malformed_url_survives_key_gen() -> None:
+    """A malformed URL survives both probe_addon (H1) and the _host_key key-gen fallback."""
+    results = await probe_all(["https://[::1"], timeout_s=5.0)
+    assert len(results) == 1
+    assert next(iter(results.values()))["status"] == "error"
+
+
+@pytest.mark.asyncio
 async def test_probe_all_empty_list() -> None:
     assert await probe_all([], timeout_s=5.0) == {}

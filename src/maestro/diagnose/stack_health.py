@@ -41,10 +41,17 @@ def _host_key(url: str) -> str:
     never surfaces as a response key. Same-host addons map to the same base
     key by design; :func:`probe_all` disambiguates them with a counter
     suffix rather than silently overwriting.
+
+    ``urlparse`` itself can raise ``ValueError`` on a malformed netloc
+    (e.g. an unbalanced IPv6 bracket); the probe must stay resilient during
+    key generation, so that falls back to the literal ``"addon"`` key.
     """
-    parsed = urlparse(url)
-    host = parsed.hostname or ""
-    return f"{parsed.scheme or 'https'}://{host}" if host else "addon"
+    try:
+        parsed = urlparse(url)
+        host = parsed.hostname or ""
+        return f"{parsed.scheme or 'https'}://{host}" if host else "addon"
+    except ValueError:
+        return "addon"
 
 
 async def probe_addon(addon_url: str, *, timeout_s: float) -> dict[str, Any]:
@@ -56,21 +63,25 @@ async def probe_addon(addon_url: str, *, timeout_s: float) -> dict[str, Any]:
     reachability, not manifest-schema completeness.
 
     Every failure mode degrades to ``status="error"`` for THIS addon only
-    (latency still recorded); none escape to sink :func:`probe_all`:
+    (latency still recorded); none escape to sink :func:`probe_all`. The
+    try block wraps URL normalization/composition AND the HTTP call, so a
+    ``urlparse`` ``ValueError`` from a malformed addon URL is caught too --
+    not just transport/JSON errors:
 
-    - ``httpx.HTTPError`` (connect, read, timeout, protocol) and
-      ``ValueError`` (incl. ``json.JSONDecodeError`` on a non-JSON body)
-      are caught.
+    - ``ValueError`` from ``normalize_addon_base_url`` / ``_compose_addon_url``
+      (malformed netloc, bad port, unbalanced IPv6 bracket) -> caught.
+    - ``httpx.HTTPError`` (connect, read, timeout, protocol) -> caught.
+    - ``ValueError`` incl. ``json.JSONDecodeError`` on a non-JSON body ->
+      caught.
     - A 200 body that is valid JSON but not an object (top-level list,
-      ``null``, number, bool, string) is guarded by an ``isinstance``
-      check and reported as ``error="manifest root is not a JSON object"``
-      -- ``.get("id")`` is only called once the body is known to be a dict.
+      ``null``, number, bool, string) is guarded by an ``isinstance`` check
+      and reported as ``error="manifest root is not a JSON object"``.
     - ``>= 400`` status -> ``error="HTTP <code>"``.
     """
-    base = normalize_addon_base_url(addon_url)
-    url = _compose_addon_url(base, "/manifest.json")
     start = time.monotonic()
     try:
+        base = normalize_addon_base_url(addon_url)
+        url = _compose_addon_url(base, "/manifest.json")
         async with httpx.AsyncClient(timeout=timeout_s) as client:
             response = await client.get(url, follow_redirects=True)
             elapsed_ms = int((time.monotonic() - start) * 1000)
