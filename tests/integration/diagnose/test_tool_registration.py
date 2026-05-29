@@ -27,7 +27,7 @@ async def test_all_diagnose_tools_registered() -> None:
 
 
 async def test_total_diagnose_tool_count_is_3() -> None:
-    """Phase 8 ships exactly 3 diagnose tools."""
+    """The diagnose domain ships exactly 3 tools."""
     mcp = create_server()
     tools = await mcp.list_tools()
     diagnose_tools = [t for t in tools if t.name.startswith("diagnose_")]
