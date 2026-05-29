@@ -57,7 +57,7 @@ _RESOLUTION_LADDER: list[str] = [
 def _redact_secrets(config: dict[str, Any]) -> dict[str, Any]:
     """Return a deepcopy of ``config`` with sensitive values redacted.
 
-    AIOStreams stores sensitive material in three places per the upstream
+    AIOStreams stores sensitive material in four places per the upstream
     UserDataSchema (see :mod:`maestro.aiostreams.schemas_generated`):
 
     1. ``services[].credentials`` -- a ``dict[str, str]`` keyed by
@@ -81,6 +81,10 @@ def _redact_secrets(config: dict[str, Any]) -> dict[str, Any]:
        schema evolves like ``services.credentials`` did -- string
        values get the wholesale ``REDACTED`` replacement; dict values
        get ``dict.fromkeys(creds, REDACTED)``.
+    4. ``parentConfig.password`` -- a nested required ``str`` on the
+       upstream ``ParentConfig`` schema. Unlike the credential
+       *containers* above, its field name (``password``) is a plain
+       sensitive scalar one level down; redacted in place when present.
 
     Any read path that surfaces config through an MCP tool MUST call
     this redactor unless the caller has explicitly opted into
@@ -130,6 +134,13 @@ def _redact_secrets(config: dict[str, Any]) -> dict[str, Any]:
             proxy["credentials"] = dict.fromkeys(proxy_creds, REDACTED)
         elif proxy_creds is not None:
             proxy["credentials"] = REDACTED
+
+    # Parent-config password (ParentConfig.password; required when
+    # parentConfig is present) -- the 4th sensitive site, nested one level
+    # under the top-level `parentConfig` key.
+    parent = out.get("parentConfig")
+    if isinstance(parent, dict) and parent.get("password") is not None:
+        parent["password"] = REDACTED
 
     return out
 

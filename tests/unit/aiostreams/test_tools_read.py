@@ -207,3 +207,24 @@ def test_redact_secrets_handles_dict_proxy_credentials() -> None:
     result = _redact_secrets(config)
     assert result["proxy"]["credentials"] == {"apiKey": "***REDACTED***"}
     assert result["proxy"]["url"] == "https://proxy.example"
+
+
+def test_redact_secrets_redacts_parent_config_password() -> None:
+    """parentConfig.password (the 4th, nested sensitive site) is redacted in place."""
+    config: dict[str, Any] = {
+        "parentConfig": {
+            "uuid": "00000000-0000-0000-0000-000000000000",
+            "password": "parent_secret_should_not_leak",
+        },
+        "tmdbApiKey": "leak_me",
+    }
+    result = _redact_secrets(config)
+    assert result["parentConfig"]["password"] == "***REDACTED***"
+    assert result["parentConfig"]["uuid"] == "00000000-0000-0000-0000-000000000000"
+    assert result["tmdbApiKey"] == "***REDACTED***"
+
+
+def test_redact_secrets_handles_missing_or_null_parent_config() -> None:
+    """Absent or null parentConfig is a safe no-op (no KeyError / TypeError)."""
+    assert "parentConfig" not in _redact_secrets({"tmdbApiKey": "x"})
+    assert _redact_secrets({"parentConfig": None})["parentConfig"] is None
