@@ -8,6 +8,9 @@ on:
 jobs:
   smoke:
     runs-on: ubuntu-latest
+    # Daily live-upstream smoke run. Real provider credentials come from repo
+    # secrets; MAESTRO_SMOKE=1 + `-m smoke` opts into the live tests that the
+    # default CI suite excludes.
     env:
       MAESTRO_SMOKE: "1"
       MAESTRO_RD_TOKEN: ${{ secrets.MAESTRO_RD_TOKEN }}
