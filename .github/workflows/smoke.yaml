@@ -8,14 +8,21 @@ on:
 jobs:
   smoke:
     runs-on: ubuntu-latest
+    # Daily live-upstream smoke run. MAESTRO_SMOKE=1 + `-m smoke` opts into the
+    # live tests the default CI suite excludes. Provider secrets are scoped to
+    # the pytest step ONLY (not job-level), so checkout / setup-uv / uv sync
+    # never see them -- limits the blast radius if a pinned third-party action
+    # were ever compromised.
     env:
       MAESTRO_SMOKE: "1"
-      MAESTRO_RD_TOKEN: ${{ secrets.MAESTRO_RD_TOKEN }}
-      MAESTRO_AIOSTREAMS_BASE_URL: ${{ secrets.MAESTRO_AIOSTREAMS_BASE_URL }}
-      MAESTRO_AIOSTREAMS_UUID: ${{ secrets.MAESTRO_AIOSTREAMS_UUID }}
-      MAESTRO_AIOSTREAMS_PASSWORD: ${{ secrets.MAESTRO_AIOSTREAMS_PASSWORD }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v3
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
       - run: uv sync --frozen
-      - run: uv run pytest tests/smoke -v -m smoke
+      - name: Smoke tests
+        env:
+          MAESTRO_RD_TOKEN: ${{ secrets.MAESTRO_RD_TOKEN }}
+          MAESTRO_AIOSTREAMS_BASE_URL: ${{ secrets.MAESTRO_AIOSTREAMS_BASE_URL }}
+          MAESTRO_AIOSTREAMS_UUID: ${{ secrets.MAESTRO_AIOSTREAMS_UUID }}
+          MAESTRO_AIOSTREAMS_PASSWORD: ${{ secrets.MAESTRO_AIOSTREAMS_PASSWORD }}
+        run: uv run pytest tests/smoke -v -m smoke

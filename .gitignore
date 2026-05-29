@@ -39,3 +39,7 @@ Thumbs.db
 # Logs
 *.log
 logs/
+
+# Refreshed integration fixtures may carry live data -- regenerate via scripts/refresh_fixtures.sh; do not commit.
+tests/integration/**/fixtures/*.json
+tests/integration/**/fixtures/.refresh.*

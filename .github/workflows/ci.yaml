@@ -11,9 +11,9 @@ jobs:
     name: Lint + type check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
       - name: Install uv
-        uses: astral-sh/setup-uv@v3
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
         with:
           enable-cache: true
       - name: Install dependencies
@@ -33,12 +33,26 @@ jobs:
       matrix:
         python: ["3.12", "3.13", "3.14"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
       - name: Install uv
-        uses: astral-sh/setup-uv@v3
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
         with:
           enable-cache: true
       - name: Install dependencies
         run: uv sync --frozen --python ${{ matrix.python }}
+      # Coverage gate runs on ONE matrix entry (3.12) -- coverage is
+      # version-invariant here, so --cov on all three would triple the work for
+      # identical numbers. pyproject [tool.coverage.report] fail_under=75
+      # enforces the floor (current coverage ~93%).
+      - name: Pytest + coverage gate (3.12)
+        if: matrix.python == '3.12'
+        run: >
+          uv run pytest tests/unit tests/schema_fidelity tests/integration
+          --cov=src/maestro --cov-report=term-missing --cov-fail-under=75 -v
       - name: Pytest
+        if: matrix.python != '3.12'
+        # Same suite, no coverage. The schema_fidelity drift test makes a live
+        # GitHub fetch but is network-tolerant (skips on outage); the `smoke`
+        # marker (live upstream) is excluded via pyproject addopts and runs in
+        # smoke.yaml.
         run: uv run pytest tests/unit tests/schema_fidelity tests/integration -v
