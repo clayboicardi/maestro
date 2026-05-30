@@ -5,9 +5,21 @@ on:
     - cron: "0 6 * * *"
   workflow_dispatch: {}
 
+# Supersede an in-flight canary if a manual dispatch overlaps the cron run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Least privilege: the smoke job only reads the repo. The notify job widens to
+# issues:write in its OWN job so the token that coexists with provider secrets
+# can never write issues (GHA permissions are job-scoped, not step-scoped).
+permissions:
+  contents: read
+
 jobs:
   smoke:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     # Daily live-upstream smoke run. MAESTRO_SMOKE=1 + `-m smoke` opts into the
     # live tests the default CI suite excludes. Provider secrets are scoped to
     # the pytest step ONLY (not job-level), so checkout / setup-uv / uv sync
@@ -17,7 +29,13 @@ jobs:
       MAESTRO_SMOKE: "1"
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
       - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          # Pinned for reproducibility (matches local dev). Dependabot bumps the
+          # action SHA but NOT this input -- re-pin manually on a uv upgrade.
+          version: "0.10.6"
       - run: uv sync --frozen
       - name: Smoke tests
         env:
@@ -26,3 +44,33 @@ jobs:
           MAESTRO_AIOSTREAMS_UUID: ${{ secrets.MAESTRO_AIOSTREAMS_UUID }}
           MAESTRO_AIOSTREAMS_PASSWORD: ${{ secrets.MAESTRO_AIOSTREAMS_PASSWORD }}
         run: uv run pytest tests/smoke -v -m smoke
+
+  # A silent daily canary helps no one: surface a red run as a tracking issue so
+  # a broken upstream contract (schema drift, expired provider secret) is visible.
+  # Isolated from the smoke job so the issues:write token never coexists with the
+  # provider secrets. Deduped by the `smoke-canary` label -- comment on the open
+  # issue if one exists, else open a fresh one. No checkout needed: gh targets the
+  # repo via GH_REPO.
+  notify-on-failure:
+    needs: smoke
+    if: failure()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Open or update tracking issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          body="Daily smoke canary failed. The live upstream contract (AIOStreams / Real-Debrid / Cinemeta) may have drifted, or a provider secret expired. Run: ${run_url}"
+          gh label create smoke-canary --color B60205 --description "Daily live-upstream smoke canary failure" --force
+          number="$(gh issue list --state open --label smoke-canary --json number --jq '.[0].number // empty')"
+          if [ -n "${number}" ]; then
+            gh issue comment "${number}" --body "${body}"
+          else
+            gh issue create --title "Smoke canary failing (live upstream contract)" --label smoke-canary --body "${body}"
+          fi
