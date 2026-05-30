@@ -1,6 +1,6 @@
 [project]
 name = "clayworks-maestro-mcp"
-version = "0.1.0"
+version = "0.2.0"
 description = "MCP server giving AI agents programmatic control over Stremio + Real-Debrid stacks (AIOStreams config CRUD, Torrentio URL builder, RD integration, find_best_stream composer)"
 readme = "README.md"
 requires-python = ">=3.12"
