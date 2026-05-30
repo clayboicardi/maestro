@@ -177,6 +177,17 @@ def _redact_secrets(config: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def redact_config(config: dict[str, Any]) -> dict[str, Any]:
+    """Public entry point for the config redactor.
+
+    Stable surface for out-of-package callers (e.g. ``scripts/refresh_fixtures.sh``
+    via ``python -m maestro.aiostreams.redact``) so they depend on a documented
+    name rather than the private :func:`_redact_secrets`. Returns a redacted
+    deepcopy; see :func:`_redact_secrets` for the full redaction contract.
+    """
+    return _redact_secrets(config)
+
+
 class AIOStreamsToolset:
     """Holds the stager + exposes one method per MCP tool.
 

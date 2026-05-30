@@ -12,8 +12,9 @@
 #     from /tmp would degrade to copy+unlink and could leave a partial fixture).
 #   - A cleanup trap removes the temp files on any exit, so a failed run never
 #     leaves the (unredacted) raw response lying around.
-#   - The AIOStreams config response is piped through maestro's `_redact_secrets`
-#     before writing, so a refreshed fixture never carries live credentials
+#   - The AIOStreams config response is piped through maestro's public redactor
+#     (`python -m maestro.aiostreams.redact`) before writing, so a refreshed
+#     fixture never carries live credentials
 #     (parentConfig.password, services/proxy creds, top-level keys, preset
 #     options) into git.
 #
@@ -61,18 +62,10 @@ case "$DOMAIN" in
             "${MAESTRO_AIOSTREAMS_BASE_URL%/}/api/v1/user/${MAESTRO_AIOSTREAMS_UUID}" \
             > "$raw"
         # Redact before the fixture can be committed -- the live config returns
-        # the same secret classes _redact_secrets guards on read paths.
-        uv run python - "$raw" "$out" <<'PY'
-import json
-import sys
-
-from maestro.aiostreams.tools import _redact_secrets
-
-with open(sys.argv[1]) as f:
-    data = json.load(f)
-with open(sys.argv[2], "w") as f:
-    json.dump(_redact_secrets(data), f, indent=2)
-PY
+        # the same secret classes the redactor guards on read paths. Use the
+        # public CLI entry (not the private _redact_secrets) so this script
+        # depends on a stable surface.
+        uv run python -m maestro.aiostreams.redact "$raw" "$out"
         mv "$out" "${FIXTURE_DIR}/get_config_response.json"
         echo "[refresh] wrote (redacted) ${FIXTURE_DIR}/get_config_response.json"
         ;;
