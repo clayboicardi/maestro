@@ -17,7 +17,7 @@ URL normalization policy:
   URLs (``https://addon.example/manifest.json``) are accepted on input
   and normalized to the bare base form at the boundary via
   :func:`normalize_addon_base_url`. The bare base is used for path
-  composition via :func:`_compose_addon_url` in ``query_stream`` and
+  composition via :func:`compose_addon_url` in ``query_stream`` and
   ``get_manifest``. Addon URLs are never stored with the
   ``/manifest.json`` suffix internally.
 
@@ -38,9 +38,9 @@ URL normalization policy:
   remains a documented surface; addon-specific path redaction is not
   in scope for the generic client.
 
-  ``normalize_addon_base_url`` is package-public: the diagnose domain's
-  ``stack_health`` probe needs the same normalization, so the function
-  is exposed rather than duplicated.
+  ``normalize_addon_base_url`` and ``compose_addon_url`` are package-public:
+  the diagnose domain's ``stack_health`` probe needs the same normalization +
+  path composition, so the functions are exposed rather than duplicated.
 
 Retry / timeout policy:
 
@@ -84,7 +84,7 @@ def normalize_addon_base_url(addon_url: str) -> str:
     Query strings are PRESERVED via ``urlunparse``. An input like
     ``https://addon.example/manifest.json?token=secret`` normalizes to
     ``https://addon.example?token=secret`` -- the auth token survives
-    so callers using :func:`_compose_addon_url` for path joining will
+    so callers using :func:`compose_addon_url` for path joining will
     correctly produce ``https://addon.example/stream/...?token=secret``
     rather than the malformed ``https://addon.example?token=secret/stream/...``
     the prior literal-string approach produced.
@@ -98,7 +98,7 @@ def normalize_addon_base_url(addon_url: str) -> str:
     return urlunparse(parsed._replace(path=new_path))
 
 
-def _compose_addon_url(base: str, path: str) -> str:
+def compose_addon_url(base: str, path: str) -> str:
     """Join ``base`` + ``path`` preserving the base's query string.
 
     Direct f-string concatenation (``f"{base}{path}"``) mangles URLs
@@ -177,7 +177,7 @@ class StremioAddonClient:
         - :class:`AddonMalformed` for invalid JSON in the response body.
         """
         base = normalize_addon_base_url(addon_url)
-        url = _compose_addon_url(base, "/manifest.json")
+        url = compose_addon_url(base, "/manifest.json")
         parsed = urlparse(url)
         # Use hostname (not netloc) so any user:pass@ userinfo is stripped before logging.
         log.info("stremio_get_manifest_request", host=parsed.hostname, path=parsed.path)
@@ -231,7 +231,7 @@ class StremioAddonClient:
             path = f"/stream/{content_type}/{imdb_id}:{season}:{episode}.json"
         else:
             path = f"/stream/{content_type}/{imdb_id}.json"
-        url = _compose_addon_url(base, path)
+        url = compose_addon_url(base, path)
         parsed = urlparse(url)
         # Use hostname (not netloc) so any user:pass@ userinfo is stripped before logging.
         log.info(
