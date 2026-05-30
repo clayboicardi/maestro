@@ -81,6 +81,25 @@ async def test_unrestrict_403_with_infringing_file_returns_structured(
 
 @respx.mock
 @pytest.mark.asyncio
+async def test_4xx_body_excerpt_redacts_bearer_token(client: RDClient) -> None:
+    """A 4xx body that echoes the bearer token is scrubbed at the client layer.
+
+    The body excerpt is embedded in the UpstreamError message, which flows
+    through MCP exception logging -- redact-at-source so every RD tool inherits
+    it. (client fixture token is "test_token_abc".)
+    """
+    respx.post("https://api.real-debrid.com/rest/1.0/unrestrict/link").mock(
+        return_value=httpx.Response(400, text="bad request near token=test_token_abc here")
+    )
+    with pytest.raises(MaestroException) as exc_info:
+        await client.unrestrict_link("https://restricted.rd/x")
+    msg = exc_info.value.error.message
+    assert "test_token_abc" not in msg
+    assert "***REDACTED***" in msg
+
+
+@respx.mock
+@pytest.mark.asyncio
 async def test_rate_limit_429_raises_rate_limit_error(client: RDClient) -> None:
     respx.get("https://api.real-debrid.com/rest/1.0/user").mock(
         return_value=httpx.Response(

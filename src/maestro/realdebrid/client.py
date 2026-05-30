@@ -194,8 +194,13 @@ class RDClient:
         if response.status_code >= HTTPStatus.BAD_REQUEST:
             # 4xx other than 401/429 — non-transient. Include a short body
             # excerpt so the filter-gate layer (Task 5.4) can pattern-match
-            # the ``infringing_file`` shape when 403 hits.
+            # the ``infringing_file`` shape when 403 hits. Redact the bearer
+            # token at source (defensive: an upstream error page that echoes
+            # the request would otherwise leak it through the exception ->
+            # MCP-logging path) so every RD tool inherits the scrub.
             body_excerpt = response.text[:200]
+            if self._token and self._token in body_excerpt:
+                body_excerpt = body_excerpt.replace(self._token, "***REDACTED***")
             raise MaestroException(
                 UpstreamError(
                     domain="realdebrid",

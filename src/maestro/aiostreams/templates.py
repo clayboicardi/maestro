@@ -35,6 +35,9 @@ Mode = Literal["Debrid", "P2P", "Both"]
 KNOWN_TEMPLATES: list[dict[str, str]] = [
     {
         "name": "Tamtaro Complete SEL Setup v2.6.1",
+        # Recorded as the AppliedTemplate.version when applied (the schema field
+        # is a required str). Keep in sync with the template's released version.
+        "version": "2.6.1",
         "source_url": (
             "https://raw.githubusercontent.com/Tam-Taro/SEL-Filtering-and-Sorting/"
             "main/templates/complete-sel-setup-v2.6.1.json"

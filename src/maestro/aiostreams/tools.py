@@ -235,9 +235,23 @@ class AIOStreamsToolset:
         return cfg.get("sortCriteria", [])
 
     async def get_active_template(self) -> str:
-        """Return active template name, or 'Custom' if hand-edited."""
+        """Return the most recently maestro-applied template name, or 'Custom'.
+
+        The marker lives in the schema's ``appliedTemplates`` list. v2.29.6 has
+        no ``presets.active`` (``presets`` is ``list[Preset3]``), so the active
+        template is the id of the most-recent ``appliedTemplates`` entry whose id
+        is a known maestro template. Entries AIOStreams writes itself (different
+        ids) are skipped, so a hand-edited config reports ``'Custom'``.
+        """
         cfg = await self._get_config()
-        return cfg.get("presets", {}).get("active", "Custom")
+        applied = cfg.get("appliedTemplates")
+        if isinstance(applied, list):
+            known = {t["name"] for t in KNOWN_TEMPLATES}
+            for entry in reversed(applied):
+                # `id in known` (a set[str]) already guarantees a str hit.
+                if isinstance(entry, dict) and entry.get("id") in known:
+                    return entry["id"]
+        return "Custom"
 
     async def get_statistics(self) -> dict[str, Any]:
         """Return Show Statistics & Errors block for dud-rate debugging."""
@@ -380,9 +394,11 @@ class AIOStreamsToolset:
         """DESTRUCTIVE: replaces config with the named template overlay.
 
         Looks up template_name in KNOWN_TEMPLATES, fetches its JSON, merges
-        into the current config (one-level deep merge), then stamps
-        `presets.active = template_name`. The mutation is staged; save()
-        flushes via PUT.
+        into the current config (one-level deep merge), then records the marker
+        as an entry in the schema's ``appliedTemplates`` list (``{id, version}``;
+        v2.29.6 has no ``presets.active``). Re-applying the same template de-dupes
+        by id (move-to-end = most recent); ``appliedTemplates`` entries AIOStreams
+        wrote itself are preserved. The mutation is staged; save() flushes via PUT.
         """
         match = next((t for t in KNOWN_TEMPLATES if t["name"] == template_name), None)
         if match is None:
@@ -392,6 +408,7 @@ class AIOStreamsToolset:
             )
 
         template_payload = await fetch_template(match["source_url"])
+        marker = {"id": template_name, "version": match["version"]}
         log.info(
             "aiostreams_apply_template",
             template_name=template_name,
@@ -401,10 +418,21 @@ class AIOStreamsToolset:
 
         def transform(cfg: dict[str, Any]) -> dict[str, Any]:
             merged = merge_template_into_config(cfg, template_payload, mode=mode)
-            merged.setdefault("presets", {})["active"] = template_name
+            # Record the marker in appliedTemplates (handles None / absent / list).
+            # Drop any prior maestro entry for this id so re-applying moves it to
+            # most-recent rather than duplicating; foreign entries are untouched.
+            existing = merged.get("appliedTemplates")
+            applied = list(existing) if isinstance(existing, list) else []
+            applied = [
+                e for e in applied if not (isinstance(e, dict) and e.get("id") == template_name)
+            ]
+            # Copy: `marker` is built once in the enclosing (match-narrowed) scope;
+            # append a fresh dict so the staged list never aliases the template.
+            applied.append(dict(marker))
+            merged["appliedTemplates"] = applied
             return merged
 
-        return await self._stager.modify(transform, field="presets.active")
+        return await self._stager.modify(transform, field="appliedTemplates")
 
     async def save(self) -> dict[str, Any]:
         """Commit all staged writes. Returns the new install URL on success."""
