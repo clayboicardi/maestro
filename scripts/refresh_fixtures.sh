@@ -46,10 +46,15 @@ out="$(mktemp "${FIXTURE_DIR}/.refresh.out.XXXXXX")"
 
 case "$DOMAIN" in
     aiostreams)
-        if [[ -z "${MAESTRO_AIOSTREAMS_BASE_URL:-}" ]]; then
-            echo "MAESTRO_AIOSTREAMS_BASE_URL not set" >&2
-            exit 1
-        fi
+        # All three are used in the curl below (BASE_URL + basic-auth UUID:PASSWORD);
+        # guard each so an unset var fails loudly here instead of as a cryptic curl
+        # error (or a request silently authed as ":").
+        for _var in MAESTRO_AIOSTREAMS_BASE_URL MAESTRO_AIOSTREAMS_UUID MAESTRO_AIOSTREAMS_PASSWORD; do
+            if [[ -z "${!_var:-}" ]]; then
+                echo "$_var not set" >&2
+                exit 1
+            fi
+        done
         echo "[refresh] fetching AIOStreams config via GET /api/v1/user"
         curl --fail-with-body -sSL \
             -u "${MAESTRO_AIOSTREAMS_UUID}:${MAESTRO_AIOSTREAMS_PASSWORD}" \
@@ -81,7 +86,7 @@ PY
             -H "Authorization: Bearer ${MAESTRO_RD_TOKEN}" \
             "https://api.real-debrid.com/rest/1.0/user" \
             > "$raw"
-        python -m json.tool "$raw" "$out"
+        uv run python -m json.tool "$raw" "$out"
         mv "$out" "${FIXTURE_DIR}/get_user_response.json"
         echo "[refresh] wrote ${FIXTURE_DIR}/get_user_response.json"
         ;;
@@ -90,7 +95,7 @@ PY
         curl --fail-with-body -sSL \
             "https://v3-cinemeta.strem.io/catalog/series/top/search=Severance.json" \
             > "$raw"
-        python -m json.tool "$raw" "$out"
+        uv run python -m json.tool "$raw" "$out"
         mv "$out" "${FIXTURE_DIR}/cinemeta_search_severance.json"
         echo "[refresh] wrote ${FIXTURE_DIR}/cinemeta_search_severance.json"
         ;;

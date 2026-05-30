@@ -6,15 +6,32 @@ on:
   pull_request:
     branches: [master, main]
 
+# Supersede in-flight runs on the same ref (a fresh push to a PR/branch cancels
+# its own prior run). The ref in the key keeps master and each PR independent,
+# so they never cancel each other.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Least privilege: this workflow only reads the repo (checkout); nothing writes.
+permissions:
+  contents: read
+
 jobs:
   lint-and-type:
     name: Lint + type check
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
       - name: Install uv
         uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
         with:
+          # Pinned for reproducibility (matches local dev). Dependabot bumps the
+          # action SHA but NOT this input -- re-pin manually on a uv upgrade.
+          version: "0.10.6"
           enable-cache: true
       - name: Install dependencies
         run: uv sync --frozen
@@ -28,15 +45,21 @@ jobs:
   test:
     name: Test (Python ${{ matrix.python }})
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
         python: ["3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
       - name: Install uv
         uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
         with:
+          # Pinned for reproducibility (matches local dev). Dependabot bumps the
+          # action SHA but NOT this input -- re-pin manually on a uv upgrade.
+          version: "0.10.6"
           enable-cache: true
       - name: Install dependencies
         run: uv sync --frozen --python ${{ matrix.python }}
