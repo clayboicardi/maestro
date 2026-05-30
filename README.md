@@ -2,7 +2,7 @@
 
 > MCP server giving AI agents programmatic control over Stremio + Real-Debrid stacks.
 
-**Status:** v0.1.0 — release-ready. All 9 implementation phases locked. See [docs/specs/2026-05-21-maestro-design.md](docs/specs/2026-05-21-maestro-design.md) for the design spec.
+**Status:** v0.2.0 — released. All 9 implementation phases locked; a post-v0.1.0 review campaign + polish pass added 2 discovery tools and hardened security/CI (see [CHANGELOG.md](CHANGELOG.md)). Design spec: [docs/specs/2026-05-21-maestro-design.md](docs/specs/2026-05-21-maestro-design.md).
 
 ## What it does
 
@@ -23,7 +23,7 @@ Maestro is a local Python MCP server that lets an AI agent (Claude Code, Cursor,
 | 8 | Diagnostics (3 health-probe tools) | Locked 2026-05-22 |
 | 9 | Release readiness (smoke workflow + refresh script + CF7) | Locked 2026-05-22 |
 
-Tool surface: 43 MCP tools (21 AIOStreams + 5 Torrentio + 7 Real-Debrid + 6 Stremio + 1 `find_best_stream` + 3 Diagnose). Test suite: 181 unit + integration tests passing + 1 opt-in smoke test. Coverage: ~92%.
+Tool surface: 45 MCP tools (21 AIOStreams + 7 Torrentio + 7 Real-Debrid + 6 Stremio + 1 `find_best_stream` + 3 Diagnose). Test suite: 252 unit + integration tests passing + 1 opt-in smoke test. Coverage: ~93%.
 
 ## Install
 
@@ -36,7 +36,7 @@ uv tool install .
 maestro-mcp --help
 ```
 
-PyPI publish is pending the v0.1.0 git tag.
+Not yet on PyPI — install from source (above). Publish is deferred (no auto-publish on tag).
 
 ## Configure
 
