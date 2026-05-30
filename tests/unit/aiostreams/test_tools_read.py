@@ -35,7 +35,15 @@ def sample_config() -> dict[str, Any]:
         ],
         "filters": {"preferred_languages": ["English"], "excluded_resolutions": ["480p"]},
         "sortCriteria": [{"key": "cached", "direction": "desc"}],
-        "presets": {"active": "tamtaro_recommended"},
+        # presets is list[Preset3] per v2.29.6 UserDataSchema (NOT a dict).
+        "presets": [
+            {"type": "torrentio", "instanceId": "t1", "enabled": True, "options": {}},
+        ],
+        # The active-template marker lives in the schema's appliedTemplates list
+        # (v2.29.6 has no presets.active).
+        "appliedTemplates": [
+            {"id": "Tamtaro Complete SEL Setup v2.6.1", "version": "2.6.1"},
+        ],
         "statistics": {"enabled": True, "show_errors": True},
         # Top-level sensitive fields (UserDataSchema in schemas_generated.py).
         "tmdbApiKey": "tmdb_secret_token",
@@ -134,10 +142,40 @@ async def test_get_sort_order_returns_criteria(toolset: AIOStreamsToolset) -> No
     assert sort_order == [{"key": "cached", "direction": "desc"}]
 
 
+def _toolset_for(config: dict[str, Any]) -> AIOStreamsToolset:
+    async def fake_get_config() -> dict[str, Any]:
+        return deepcopy(config)
+
+    async def fake_put_config(body: dict[str, Any]) -> dict[str, Any]:
+        return {"ok": True}
+
+    return AIOStreamsToolset(get_config=fake_get_config, put_config=fake_put_config)
+
+
 @pytest.mark.asyncio
-async def test_get_active_template(toolset: AIOStreamsToolset) -> None:
+async def test_get_active_template_reads_applied_templates(toolset: AIOStreamsToolset) -> None:
+    """Active template is read from the schema's appliedTemplates list (v2.29.6)."""
     name = await toolset.get_active_template()
-    assert name == "tamtaro_recommended"
+    assert name == "Tamtaro Complete SEL Setup v2.6.1"
+
+
+@pytest.mark.asyncio
+async def test_get_active_template_defaults_to_custom_without_marker() -> None:
+    """No maestro marker in appliedTemplates -> 'Custom'. presets is a list (real shape)."""
+    ts = _toolset_for({"filters": {}, "presets": []})
+    assert await ts.get_active_template() == "Custom"
+
+
+@pytest.mark.asyncio
+async def test_get_active_template_ignores_foreign_applied_entries() -> None:
+    """appliedTemplates entries that aren't maestro templates are ignored (collision guard)."""
+    ts = _toolset_for(
+        {
+            "presets": [],
+            "appliedTemplates": [{"id": "aiostreams-native-builtin", "version": "9.9"}],
+        }
+    )
+    assert await ts.get_active_template() == "Custom"
 
 
 @pytest.mark.asyncio
