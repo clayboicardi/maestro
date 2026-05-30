@@ -248,9 +248,9 @@ class AIOStreamsToolset:
         if isinstance(applied, list):
             known = {t["name"] for t in KNOWN_TEMPLATES}
             for entry in reversed(applied):
+                # `id in known` (a set[str]) already guarantees a str hit.
                 if isinstance(entry, dict) and entry.get("id") in known:
-                    template_id = entry["id"]
-                    return template_id if isinstance(template_id, str) else "Custom"
+                    return entry["id"]
         return "Custom"
 
     async def get_statistics(self) -> dict[str, Any]:
@@ -426,7 +426,9 @@ class AIOStreamsToolset:
             applied = [
                 e for e in applied if not (isinstance(e, dict) and e.get("id") == template_name)
             ]
-            applied.append(marker)
+            # Copy: `marker` is built once in the enclosing (match-narrowed) scope;
+            # append a fresh dict so the staged list never aliases the template.
+            applied.append(dict(marker))
             merged["appliedTemplates"] = applied
             return merged
 
