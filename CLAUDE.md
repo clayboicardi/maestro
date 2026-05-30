@@ -10,6 +10,7 @@ Project conventions and gotchas a developer (human or AI) needs in scope before 
 - **Secrets**: `SecretStr` fields require `.get_secret_value()` for comparison. `SecretStr.__eq__` does NOT compare to plain strings (Pydantic v2 behavior).
 - **Schema regen**: `scripts/regen_aiostreams_schemas.sh` is pinned to AIOStreams v2.29.6 (Zod 4). Re-pinning means updating BOTH the script's version constant AND `tests/schema_fidelity/aiostreams_schema.sha256` (LF-terminated, 65 bytes).
 - **Generated code**: `src/maestro/aiostreams/schemas_generated.py` is auto-generated and lint-exempt via `pyproject.toml`. Don't hand-edit; re-run the regen script.
+- **AIOStreams `presets` is a list, not a dict**: v2.29.6 `UserDataSchema.presets` is `list[Preset3]` (required, `extra="forbid"`) — there is **no** `presets.active`. The active-template marker lives in `appliedTemplates` (`{id, version}`); `get_active_template` filters to known-maestro-template ids so AIOStreams' own `appliedTemplates` entries don't masquerade as active. Don't reintroduce a `presets.active` read/write — it raises on real configs and is rejected on PUT.
 
 ## Lint / test gotchas
 
