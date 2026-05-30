@@ -8,7 +8,7 @@ URL handling reuses the Stremio client's helpers so the probe hits the
 SAME endpoint the streaming path would:
 :func:`maestro.stremio.normalize_addon_base_url` strips the
 ``/manifest.json`` suffix + trailing slashes (preserving any query string),
-and :func:`maestro.stremio.client._compose_addon_url` re-joins the
+and :func:`maestro.stremio.compose_addon_url` re-joins the
 ``/manifest.json`` path via ``urlparse`` so a query-auth base like
 ``https://x?token=S`` composes to ``https://x/manifest.json?token=S`` rather
 than the malformed ``https://x?token=S/manifest.json`` an f-string produces.
@@ -23,8 +23,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-from maestro.stremio import normalize_addon_base_url
-from maestro.stremio.client import _compose_addon_url
+from maestro.stremio import compose_addon_url, normalize_addon_base_url
 
 # HTTP status threshold for "addon manifest probe failed". 4xx/5xx are
 # both classified as ``error`` because either prevents the addon from
@@ -68,7 +67,7 @@ async def probe_addon(addon_url: str, *, timeout_s: float) -> dict[str, Any]:
     ``urlparse`` ``ValueError`` from a malformed addon URL is caught too --
     not just transport/JSON errors:
 
-    - ``ValueError`` from ``normalize_addon_base_url`` / ``_compose_addon_url``
+    - ``ValueError`` from ``normalize_addon_base_url`` / ``compose_addon_url``
       (malformed netloc, bad port, unbalanced IPv6 bracket) -> caught.
     - ``httpx.HTTPError`` (connect, read, timeout, protocol) -> caught.
     - ``ValueError`` incl. ``json.JSONDecodeError`` on a non-JSON body ->
@@ -81,7 +80,7 @@ async def probe_addon(addon_url: str, *, timeout_s: float) -> dict[str, Any]:
     start = time.monotonic()
     try:
         base = normalize_addon_base_url(addon_url)
-        url = _compose_addon_url(base, "/manifest.json")
+        url = compose_addon_url(base, "/manifest.json")
         async with httpx.AsyncClient(timeout=timeout_s) as client:
             response = await client.get(url, follow_redirects=True)
             elapsed_ms = int((time.monotonic() - start) * 1000)
